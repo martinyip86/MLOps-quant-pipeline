@@ -1,0 +1,35 @@
+# --- Infrastructure and Configuration ---
+pydantic
+pydantic-settings
+pyyaml
+python-dotenv
+loguru
+
+# --- Exchanges and Networks ---
+ccxt
+requests
+fastapi
+uvicorn[standard]
+prometheus_client
+prometheus-fastapi-instrumentator
+
+# --- Data Science and High-Performance Computing (The Core of QR) ---
+pandas
+polars
+numpy
+pyarrow
+numba
+scipy
+
+# --- Statistics and Machine Learning ---
+scikit-learn
+statsmodels
+
+# --- Visualization ---
+matplotlib
+plotly
+
+# --- database ---
+redis
+clickhouse
+tenacity
