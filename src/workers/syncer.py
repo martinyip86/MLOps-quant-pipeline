@@ -50,6 +50,10 @@ class Syncer:
         pending_ack = {}
         last_flush = time.time()
         while True:
+            if not self.streaming_keys:
+                await asyncio.sleep(1) # 快速轮询等待初始化
+                continue
+
             response = await self.redis.xreadgroup(
                 groupname=self.group_name,
                 consumername="worker_01",
@@ -57,16 +61,16 @@ class Syncer:
                 count=500,
                 block=5000
             )
-
             if response:
                 for stream_name,messages in response:
                     print(f"📡 处理来自 {stream_name} 的 {len(messages)} 条消息")
+                    s_key = stream_name.decode() if isinstance(stream_name, bytes) else stream_name
                     if stream_name not in pending_ack:
-                        pending_ack[stream_name] = []
+                        pending_ack[s_key] = []
 
                     for msg_id,conetent in messages:
-                        pending_ack[stream_name].append(msg_id)
-                        buffer.append(json.loads(conetent['data']))
+                        pending_ack[s_key].append(msg_id)
+                        buffer.append((s_key,json.loads(conetent['data'])))
 
             if len(buffer) > self.batch_size or (time.time() - last_flush > self.flush_interval and buffer):
                 success = await self._flush(buffer)
@@ -87,17 +91,25 @@ class Syncer:
     async def _flush(self,data):
         if not data: return
 
-        orderbook_buffer = []
-        trades_buffer = []
+        buckets = {}
+        for stream_key,content in data:
+            parts = stream_key.split(':')
+            if len(parts) < 5: continue
 
-        for raw in data:
-            if 'trade_id' in raw:
-                trades_buffer.append(raw)
-            else:
-                orderbook_buffer.append(raw)
+            mkt_type = parts[2]
+            table_name = parts[-1]
+
+            target_table = f"{table_name}_{mkt_type}"
+            if target_table not in buckets:
+                buckets[target_table] = []
+
+            buckets[target_table].append(content)
         try:
-            await self._insert_db('orderbook',orderbook_buffer)
-            await self._insert_db('trades',trades_buffer)
+            tasks = [
+                self._insert_db(target_table,data)
+                for target_table,data in buckets.items() if data
+            ]
+            await asyncio.gather(*tasks)
             return True
         except Exception as e:
             return False
@@ -148,6 +160,7 @@ class Syncer:
                 await asyncio.sleep(10)
 
     async def main(self):
+        print(await self.redis.smembers('registry:streams:orderbook'))
         tasks = []
         tasks.append(asyncio.create_task(self.system_monitor_task()))
         tasks.append(asyncio.create_task(start_metrics_pusher(job_name="worker_syncer")))

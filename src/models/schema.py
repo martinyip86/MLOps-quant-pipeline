@@ -16,7 +16,7 @@ class TickData(BaseModel):
     ask_volumes:List[float] = Field(...,description="aArray of top 20 ask volumes")
     nonce:int = Field(...,description="Exchange sequence number/Update ID")
     timestamp:int = Field(...,description="Original exchange matching engine timestamp (ms)")
-    local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp * 1000))
+    local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
 
 class TradeData(BaseModel):
     exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")

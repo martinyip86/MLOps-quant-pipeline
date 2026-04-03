@@ -1,0 +1,158 @@
+services:
+  collector-binance:
+    build: .
+    container_name: collector-binance
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./src:/app/src
+    environment:
+      - EXCHANGE=binance
+      - TYPE=spot
+      - PYTHONPATH=/app
+    deploy:
+      resources:
+        limits:
+          memory: 5G
+        reservations:
+          memory: 2G
+    depends_on:
+      quant-redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+
+  collector-okx:
+    build: .
+    container_name: collector-okx
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./src:/app/src
+    environment:
+      - EXCHANGE=okx
+      - TYPE=spot
+      - PYTHONPATH=/app
+    depends_on:
+      quant-redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  syncer:
+    build: .
+    container_name: syncer-server
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./src:/app/src
+    environment:
+      - PYTHONPATH=/app
+    command: python -m src.workers.syncer
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+    depends_on:
+      quant-redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deploy/prometheus/prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  pushgateway:
+    image: prom/pushgateway:latest
+    ports:
+      - "9091:9091"
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=administration
+    volumes:
+      - ./deploy/grafana/grafana_data:/var/lib/grafana
+    user: "472"
+    depends_on:
+      - prometheus
+
+  quant-redis:
+    image: redis:alpine
+    container_name: quant-redis-server
+    env_file:
+      - .env
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --bind 0.0.0.0
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+        
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-server
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USERNAME}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./deploy/clickhouse/clickhouse_data:/var/lib/clickhouse
+      - ./logs/clickhouse:/var/log/clickhouse-server
+      - ./data:/var/lib/clickhouse/user_files/data
+      - ./deploy/clickhouse/init_script:/docker-entrypoint-initdb.d
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget","--spider","-q","localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    restart: always
+  

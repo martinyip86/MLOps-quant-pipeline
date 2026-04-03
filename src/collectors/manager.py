@@ -1,5 +1,7 @@
-from src.collector.binace.spot import BinanceSpotWsManager
+from src.collectors.binace.spot import BinanceSpotWsManager
+from src.collectors.okx.spot import OkxSpotWsManager
 from src.monitoring.pusher import start_metrics_pusher
+import os
 import asyncio
 import argparse
 
@@ -9,13 +11,17 @@ class Manager:
         self.mkt_type:str = mkt_type
         self.symbols = ['BTC/USDT','ETH/USDT']
         self._collector_map = {
-            ('binance','spot'):BinanceSpotWsManager
+            ('binance','spot'):BinanceSpotWsManager,
+            ('okx','spot'):OkxSpotWsManager,
         }
 
     async def main(self):
         tasks = []
-        controller = self._collector_map.get((self.exchange_id,self.mkt_type == 'spot'))
-        controller = controller(self.exchange_id,self.mkt_type)
+        collector_class = self._collector_map.get((self.exchange_id,self.mkt_type))
+        if not collector_class:
+            print(f"Error: {self.exchange_id} {self.mkt_type} 不在支持列表中")
+            return
+        controller = collector_class(self.exchange_id,self.mkt_type)
         await controller.connect()
                 
         for symbol in self.symbols:
@@ -29,8 +35,8 @@ class Manager:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exchange',type=str,default='binance')
-    parser.add_argument('--type',type=str,default='spot')
+    parser.add_argument('--exchange',type=str,default=os.getenv('EXCHANGE', 'binance'))
+    parser.add_argument('--type',type=str,default=os.getenv('TYPE', 'spot'))
     args = parser.parse_args()
     manager = Manager(exchange_id=args.exchange,mkt_type=args.type)
     

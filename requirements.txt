@@ -31,5 +31,5 @@ plotly
 
 # --- database ---
 redis
-clickhouse
+clickhouse-connect
 tenacity

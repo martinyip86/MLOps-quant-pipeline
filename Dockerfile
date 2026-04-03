@@ -12,5 +12,7 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r re
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
+ENV EXCHANGE=binance
+ENV TYPE=mkt_type
 
-CMD ["python","main.py"]
+CMD ["python", "-m", "src.collectors.manager"]
