@@ -77,6 +77,28 @@ services:
       clickhouse:
         condition: service_healthy
 
+  ofelia:
+    image: mcuadros/ofelia:latest
+    container_name: quant-ofelia
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: daemon --docker
+
+  daily-patcher:
+    build: .
+    container_name: quant-daily-patcher
+    command: tail -f /dev/null
+    volumes:
+      - .:/app:cached
+    environment:
+      - PYTHONPATH=/app
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.daily_full_sync.schedule: "0 0 9 * * *"
+      ofelia.job-exec.daily_full_sync.command: "python -m src.pipeline_runner"
+    tty: true
+    stdin_open: true
+
   prometheus:
     image: prom/prometheus:latest
     volumes:

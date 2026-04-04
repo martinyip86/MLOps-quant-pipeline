@@ -35,6 +35,7 @@ class StreamBase(ABC):
     async def watch_loop(self,symbol,method_name):
         retry_delay = 1
         last_active = time.time()
+        is_active = True
         while True:
             try:
                 if self._is_reconnecting or not self.ws:
@@ -47,12 +48,23 @@ class StreamBase(ABC):
                 last_active = time.time()
                 retry_delay = 1 # 成功后重置退避时间
 
+                if not is_active:
+                    is_active = True
+                    silence_gauge.labels(
+                        exchange=self.exchange_id,
+                        mkt_type=self.mkt_type,
+                        symbol=symbol,
+                        method_name=method_name
+                    ).set(0)
+                    self.logger.info(f"{symbol} {method_name} reconnect success")
+
                 await self.queue.put({
                     'type':'orderbook' if 'book' in method_name else 'trades',
                     'symbol':symbol,
                     'data':data
                 })
             except (asyncio.TimeoutError, Exception) as e:
+                is_active = False
                 silence_gap = time.time() - last_active
                 silence_gauge.labels(
                     exchange=self.exchange_id,
