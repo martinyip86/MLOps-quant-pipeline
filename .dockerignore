@@ -5,6 +5,7 @@
 .gitignore
 .dockerignore
 .vscode
+.git
 
 log
 data

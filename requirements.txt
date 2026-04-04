@@ -4,6 +4,7 @@ pydantic-settings
 pyyaml
 python-dotenv
 loguru
+orjson
 
 # --- Exchanges and Networks ---
 ccxt

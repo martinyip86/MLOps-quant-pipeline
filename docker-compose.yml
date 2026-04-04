@@ -16,9 +16,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 5G
+          memory: 1G
         reservations:
-          memory: 2G
+          memory: 512M
     depends_on:
       quant-redis:
         condition: service_healthy
@@ -40,6 +40,12 @@ services:
       - EXCHANGE=okx
       - TYPE=spot
       - PYTHONPATH=/app
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
     depends_on:
       quant-redis:
         condition: service_healthy
@@ -62,9 +68,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
-        reservations:
           memory: 2G
+        reservations:
+          memory: 1G
     depends_on:
       quant-redis:
         condition: service_healthy
@@ -124,7 +130,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 2G
+        reservations:
+          memory: 1G
         
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -137,6 +145,7 @@ services:
       - "9000:9000"
     volumes:
       - ./deploy/clickhouse/clickhouse_data:/var/lib/clickhouse
+      - ./deploy/clickhouse/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml
       - ./logs/clickhouse:/var/log/clickhouse-server
       - ./data:/var/lib/clickhouse/user_files/data
       - ./deploy/clickhouse/init_script:/docker-entrypoint-initdb.d
@@ -153,6 +162,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
+          memory: 4G
+        reservations:
+          memory: 2G
     restart: always
   

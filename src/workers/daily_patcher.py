@@ -18,11 +18,14 @@ class DailyPatcher:
     def __init__(self,target_date:str):
         # Defaults to yesterday if no date is provided
         self.date_str = target_date or (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
-        self.logger = setup_logger('daily.patcher',log_file='logs/syncer/daily_patcher.log')
+        self.logger = setup_logger(
+            name='daily.patcher',
+            log_file='logs/workers/daily_patcher.log'
+        )
         self.logger.propagate = False
         self.ch_client = None
         self.exchange_ids = ['binance','okx']
-        self.symbols = ['BTC/USDT','ETH/USDT','PEPE/USDT','SOL/USDT']
+        self.symbols = ['BTC/USDT','ETH/USDT']
         # Mapping raw exchange CSV headers to internal processing logic
         self.csv_columns = {
             'binance': ["trade_id","price","amount","cost","timestamp","is_maker","is_best"],
@@ -31,7 +34,7 @@ class DailyPatcher:
 
     def setup(self):
         """Initializes database connectivity."""
-        self.ch_client = ch_manager.market_db
+        self.ch_client = ch_manager.connect
 
     def check_data_exists(self,target_date_str:str,exchange_id,symbol):
         """
@@ -42,7 +45,7 @@ class DailyPatcher:
             SELECT 
                 trade_id 
             FROM 
-                trades 
+                trades_spot
             WHERE symbol='{symbol}' AND exchange_id='{exchange_id}'
                 AND timestamp >= toUnixTimestamp64Milli(toDateTime64('{target_date_str} 00:00:00',3))
                 AND timestamp < toUnixTimestamp64Milli(toDateTime64('{target_date_str} 00:00:00',3) + INTERVAL 1 DAYS)
@@ -116,7 +119,7 @@ class DailyPatcher:
             SELECT
                 trade_id
             FROM 
-                trades
+                trades_spot
             WHERE trade_id BETWEEN {min_trade_id} AND {max_trade_id}
             AND exchange_id='{exchange_id}' AND symbol='{symbol}'
             ORDER BY trade_id ASC
@@ -124,7 +127,7 @@ class DailyPatcher:
 
         df = pl.from_pandas(self.ch_client.query_df(sql))
         if df.is_empty():
-            return pl.DataFrame({"trade_id": []}, schema={"trade_id": pl.String})
+            return pl.DataFrame({"trade_id": []}, schema={"trade_id": pl.Int64})
         
         return df
 
@@ -240,7 +243,7 @@ class DailyPatcher:
                     side,
                     is_taker_buyer
                 FROM
-                    trades FINAL
+                    trades_spot FINAL
                 WHERE exchange_id='{exchange_id}' AND symbol='{symbol}'
                     AND trade_id BETWEEN {min_trade_id} AND {max_trade_id}
                 ORDER BY trade_id ASC

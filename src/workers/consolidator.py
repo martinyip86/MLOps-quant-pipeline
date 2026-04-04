@@ -16,11 +16,11 @@ class Consolidator:
         self.logger = setup_logger("workers.consolidator")
         self.target_date = target_date
         self.exchanges = ['binance','okx']
-        self.symbols = ['BTC/USDT','ETH/USDT','SOL/USDT','PEPE/USDT']
+        self.symbols = ['BTC/USDT','ETH/USDT']
         self.data_types = ['orderbook','trades']
         self.mkt_types = ['spot']
         self.fields = {
-            'orderbook_spot':"""
+            'orderbook':"""
                     nonce,
                     symbol,
                     mkt_type,
@@ -34,7 +34,7 @@ class Consolidator:
                     arraySlice(ask_prices,1,20) AS ask_prices,
                     arraySlice(ask_volumes,1,20) AS ask_volumes,
                     timestamp""",
-            'trades_spot':"""
+            'trades':"""
                 trade_id,
                 trade_id_raw,
                 symbol,
@@ -59,14 +59,14 @@ class Consolidator:
 
     def setup(self):
         """Initializes database connection."""
-        self.ch_client = ch_manager.market_db
+        self.ch_client = ch_manager.connect
 
     def daily_feature_consolidation(self,symbol:str,exchange_id:str,mkt_type:str,data_type:str,current_date:str):
         """
         Materializes daily raw data into professional Parquet format for backtesting.
         """
         clear_symbol = symbol.replace('/','-')
-        table_name = f"market_data.{data_type}"
+        table_name = f"market_data.{data_type}_spot"
         target_date_obj = datetime.strptime(current_date,'%Y-%m-%d')
 
         # Standardized hierarchical storage structure

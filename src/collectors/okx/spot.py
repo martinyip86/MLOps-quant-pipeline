@@ -15,8 +15,9 @@ class OkxSpotWsManager(StreamBase):
             
             try:
                 if self.ws:
+                    self.logger.info(f"🔄 [CLOSE] Close old CCXT Pro client for {self.exchange_id}")
                     await self.ws.close()
-
+                self.logger.info(f"🔄 [RECONNECT] Initializing new CCXT Pro client for {self.exchange_id}...")
                 self.ws = ccxt_pro.okx({
                     'enableRateLimit':True,
                     'options':{
