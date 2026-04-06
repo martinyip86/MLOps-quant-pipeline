@@ -66,36 +66,39 @@ class StreamBase(ABC):
             except (asyncio.TimeoutError, Exception) as e:
                 is_active = False
                 silence_gap = time.time() - last_active
-                silence_gauge.labels(
-                    exchange=self.exchange_id,
-                    mkt_type=self.mkt_type,
-                    symbol=symbol,
-                    method_name=method_name
-                ).set(silence_gap)
 
-                self.logger.error(f"⚠️ {symbol} {method_name} Error: {e} (Silence: {silence_gap:.1f}s)")
-                ws_error_total.labels(exchange=self.exchange_id,mkt_type=self.mkt_type,symbol=symbol).inc()
-                
-                is_timeout = isinstance(e, asyncio.TimeoutError)
-                is_network_error = any(msg in str(e).lower() for msg in ['closed', 'reset', 'disconnected', 'none type'])
+                if self._is_reconnecting and silence_gap < 5:
+                    self.logger.debug(f"ℹ️ {symbol} {method_name} suppressed during global reconnect.")
+                else:
+                    silence_gauge.labels(
+                        exchange=self.exchange_id,
+                        mkt_type=self.mkt_type,
+                        symbol=symbol,
+                        method_name=method_name
+                    ).set(silence_gap)
 
-                if silence_gap > 61 or is_network_error or is_timeout:
-                    if not self._is_reconnecting:
-                        self._is_reconnecting = True
-                        self.logger.warning(f"🚨 [FATAL] {symbol} {method_name} dead. Triggering global reconnect...")
-                        ws_reconnect_total.labels(
-                            exchange=self.exchange_id,
-                            mkt_type=self.mkt_type,
-                            symbol=symbol,
-                            method_name=method_name
-                        ).inc()
-                        await self.connect()
+                    self.logger.error(f"⚠️ {symbol} {method_name} Error: {e} (Silence: {silence_gap:.1f}s)")
+                    ws_error_total.labels(exchange=self.exchange_id,mkt_type=self.mkt_type,symbol=symbol).inc()
+                    
+                    is_timeout = isinstance(e, asyncio.TimeoutError)
+                    is_network_error = any(msg in str(e).lower() for msg in ['closed', 'reset', 'disconnected', 'none type'])
 
-                    last_active = time.time()
-                    continue
+                    if silence_gap > 61 or is_network_error or is_timeout:
+                        if not self._is_reconnecting:
+                            self._is_reconnecting = True
+                            self.logger.warning(f"🚨 [FATAL] {symbol} {method_name} dead. Triggering global reconnect...")
+                            ws_reconnect_total.labels(
+                                exchange=self.exchange_id,
+                                mkt_type=self.mkt_type,
+                                symbol=symbol,
+                                method_name=method_name
+                            ).inc()
+                            await self.connect()
 
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 60) # 指数退避
+                        last_active = time.time()
+
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 60) # 指数退避
 
     async def route(self):
         while True:
