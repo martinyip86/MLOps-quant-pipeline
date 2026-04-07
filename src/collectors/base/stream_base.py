@@ -2,6 +2,7 @@ from abc import ABC,abstractmethod
 from src.utils.logger import setup_logger
 from src.storage.redis.client import redis_manager
 from src.monitoring.metrics import ws_reconnect_total,silence_gauge,ws_error_total
+from aiohttp import web
 import asyncio
 import time
 
@@ -15,6 +16,7 @@ class StreamBase(ABC):
             name=f'ws_collector_{exchange_id}_{mkt_type}',
             log_file=f"logs/collector/collector_{exchange_id}_{mkt_type}.log"
         )
+        self.last_time = time.time()
         self.redis = redis_manager.connect
         self._is_reconnecting = False
         self._reconnect_lock = asyncio.Lock()
@@ -45,6 +47,7 @@ class StreamBase(ABC):
                 method = getattr(self.ws,method_name)
                 data = await asyncio.wait_for(method(symbol),timeout=60)
 
+                self.last_time = time.time()
                 last_active = time.time()
                 retry_delay = 1 # 成功后重置退避时间
 
@@ -116,3 +119,19 @@ class StreamBase(ABC):
                 self.logger.error(f"route have error: {e}")
                 ws_error_total.labels(exchange=self.exchange_id,mkt_type=self.mkt_type,symbol=msg['symbol']).inc()
                 await asyncio.sleep(0.1)
+
+    async def start_health_check(self,port=8080):
+
+        async def handle(_request):
+            silence_duration = time.time() - self.last_time
+            if silence_duration > 120:
+                return web.Response(status=500,text=f"Data Silence: {silence_duration:.2f}s")
+            return web.Response(status=200,text="OK")
+        
+        app = web.Application()
+        app.router.add_get('/health',handle)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner,'0.0.0.0',port)
+        print(f"✅ Health check server started at : {port}/health")
+        await site.start()

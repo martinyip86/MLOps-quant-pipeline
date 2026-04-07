@@ -30,6 +30,7 @@ class Manager:
 
         tasks.append(asyncio.create_task(controller.route()))
         tasks.append(asyncio.create_task(start_metrics_pusher(job_name=f"market_collector_{self.exchange_id}_{self.mkt_type}")))
+        tasks.append(asyncio.create_task(controller.start_health_check()))
                    
         await asyncio.gather(*tasks)
 

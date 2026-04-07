@@ -1,6 +1,8 @@
 services:
   collector-binance:
-    build: .
+    build: 
+      context: .
+      target: final
     container_name: collector-binance
     restart: always
     env_file:
@@ -13,9 +15,16 @@ services:
       - EXCHANGE=binance
       - TYPE=spot
       - PYTHONPATH=/app
+    healthcheck:
+      test: ["CMD", "curl","-f","http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
         limits:
+          cpus: '0.5'
           memory: 1G
         reservations:
           memory: 512M
@@ -27,7 +36,9 @@ services:
 
 
   collector-okx:
-    build: .
+    build: 
+      context: .
+      target: final
     container_name: collector-okx
     restart: always
     env_file:
@@ -40,9 +51,16 @@ services:
       - EXCHANGE=okx
       - TYPE=spot
       - PYTHONPATH=/app
+    healthcheck:
+      test: ["CMD", "curl","-f","http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
         limits:
+          cpus: '0.5'
           memory: 1G
         reservations:
           memory: 512M
@@ -101,6 +119,10 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
+    command: 
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
     volumes:
       - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./deploy/prometheus/prometheus_data:/prometheus
