@@ -1,6 +1,6 @@
 from src.storage.clickhouse.client import ch_manager
 from src.utils.weight_manager import WeightManager
-from research.factor_analysis import AlphaRearch
+from research.factor_analysis import AlphaResearch
 from datetime import datetime,timedelta,timezone
 import polars as pl
 import glob
@@ -44,7 +44,7 @@ class TrainAlpha:
             ((pl.col('bid_prices').list.get(0) + pl.col('ask_prices').list.get(0)) / 2).alias('mid_price')
         ]).select(['timestamp','bid_prices','bid_volumes','ask_prices','ask_volumes','mid_price'])
     
-    def _save_weight(self,weights,metrics):
+    def _save_weight(self,weights):
         model_weight = WeightManager()
         old_weight = model_weight.load_weight(self.exchange_id,self.mkt_type,self.symbol,'orderbook')
 
@@ -52,8 +52,7 @@ class TrainAlpha:
 
         for side in ["long","short"]:
             final_dict[side] = {
-                **weights[side],
-                **metrics[side]
+                **weights[side]
             }
 
         if old_weight is not None:
@@ -81,10 +80,10 @@ class TrainAlpha:
 
         df = df_final.sort('timestamp').collect()
 
-        research = AlphaRearch(df)
+        research = AlphaResearch(df)
         research.compute_features().label_data().train_combined_signal()
 
-        self._save_weight(research.weights,research.metrics)
+        self._save_weight(research.weights)
 
 
 if __name__=='__main__':
