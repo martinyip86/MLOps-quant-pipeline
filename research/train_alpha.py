@@ -20,7 +20,21 @@ class TrainAlpha:
                 bid_volumes,
                 ask_prices,
                 ask_volumes,
-                (bid_prices[1] + ask_prices[1]) / 2 as mid_price
+                (bid_prices[1] * ask_volumes[1] + ask_prices[1] * bid_volumes[1]) / nullIf(bid_volumes[1] + ask_volumes[1],0) AS micro_price,
+                (bid_volumes[1] - ask_volumes[1]) / nullIf(bid_volumes[1] + ask_volumes[1],0) AS imbalance,
+                ask_prices[1] - bid_prices[1] AS spread,
+                (bid_prices[1] + ask_prices[1]) / 2 as mid_price,
+                (
+                    arraySum(
+                        arrayMap(
+                            (p,v) -> p * v,
+                            arraySlice(ask_prices,1,10),
+                            arraySlice(ask_volumes,1,10)
+                        )
+                    ) /
+                    nullIf(arraySum(arraySlice(ask_volumes,1,10)),0)
+                ) AS sim_buy_price_avg,
+                ((sim_buy_price_avg / mid_price) - 1) * 10000 AS buy_impact_bps
             FROM market_data.orderbook_{mkt_type}
             WHERE exchange_id='{exchange_id}'
                 AND symbol='{symbol}'
@@ -40,9 +54,7 @@ class TrainAlpha:
             print("files aren't exists")
             return None
         
-        return pl.scan_parquet(files).with_columns([
-            ((pl.col('bid_prices').list.get(0) + pl.col('ask_prices').list.get(0)) / 2).alias('mid_price')
-        ]).select(['timestamp','bid_prices','bid_volumes','ask_prices','ask_volumes','mid_price'])
+        return pl.scan_parquet(files).select(['timestamp','bid_prices','bid_volumes','ask_prices','ask_volumes','micro_price','imbalance','spread','mid_price','sim_buy_price_avg','buy_impact_bps'])
     
     def _save_weight(self,weights):
         model_weight = WeightManager()

@@ -43,8 +43,8 @@ class AlphaResearch:
         ]).with_columns([
             ((pl.col('vamp') - pl.col('ask_prices').list.get(0)) / pl.col('ask_prices').list.get(0) * 10000).alias('vamp_bias_bp_long'),
             ((pl.col('bid_prices').list.get(0) - pl.col('vamp')) / pl.col('bid_prices').list.get(0) * 10000).alias('vamp_bias_bp_short'),
-            (pl.col('bid_volumes').list.get(0) / (pl.col('bid_volumes').list.get(0) + pl.col('ask_volumes').list.get(0) + 1e-8)).alias('imbalance'),
-            ((pl.col('bid_prices').list.get(0) * pl.col('ask_volumes').list.get(0) + pl.col('ask_prices').list.get(0) * pl.col('bid_volumes').list.get(0)) / (pl.col('bid_volumes').list.get(0) + pl.col('ask_volumes').list.get(0) + 1e-8)).alias('microprice')
+            # (pl.col('bid_volumes').list.get(0) / (pl.col('bid_volumes').list.get(0) + pl.col('ask_volumes').list.get(0) + 1e-8)).alias('imbalance'),
+            # ((pl.col('bid_prices').list.get(0) * pl.col('ask_volumes').list.get(0) + pl.col('ask_prices').list.get(0) * pl.col('bid_volumes').list.get(0)) / (pl.col('bid_volumes').list.get(0) + pl.col('ask_volumes').list.get(0) + 1e-8)).alias('microprice')
         ])
         return self
     
@@ -55,11 +55,11 @@ class AlphaResearch:
         fee = 2 * 0.0002 * 10000
 
         for lag in lags:
-            future_micro = self.df['microprice'].shift(-lag)
+            future_micro = self.df['micro_price'].shift(-lag)
 
             self.df = self.df.with_columns([
-                ((future_micro - pl.col('microprice')) / pl.col('microprice') * 10000).alias(f"target_{lag}_tick_long"),
-                ((pl.col('microprice') - future_micro) / pl.col('microprice') * 10000).alias(f"target_{lag}_tick_short")
+                ((future_micro - pl.col('micro_price')) / pl.col('micro_price') * 10000).alias(f"target_{lag}_tick_long"),
+                ((pl.col('micro_price') - future_micro) / pl.col('micro_price') * 10000).alias(f"target_{lag}_tick_short")
             ])
 
         n = len(self.df)

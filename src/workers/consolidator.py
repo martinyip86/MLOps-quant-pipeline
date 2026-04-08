@@ -29,6 +29,18 @@ class Consolidator:
                     (bid_prices[1] * ask_volumes[1] + ask_prices[1] * bid_volumes[1]) / nullIf(bid_volumes[1] + ask_volumes[1],0) AS micro_price,
                     (bid_volumes[1] - ask_volumes[1]) / nullIf(bid_volumes[1] + ask_volumes[1],0) AS imbalance,
                     ask_prices[1] - bid_prices[1] AS spread,
+                    (bid_prices[1] + ask_prices[1]) / 2 as mid_price,
+                    (
+                        arraySum(
+                            arrayMap(
+                                (p,v) -> p * v,
+                                arraySlice(ask_prices,1,10),
+                                arraySlice(ask_volumes,1,10)
+                            )
+                        ) /
+                        nullIf(arraySum(arraySlice(ask_volumes,1,10)),0)
+                    ) AS sim_buy_price_avg,
+                    ((sim_buy_price_avg / mid_price) - 1) * 10000 AS buy_impact_bps, 
                     arraySlice(bid_prices,1,20) AS bid_prices,
                     arraySlice(bid_volumes,1,20) AS bid_volumes,
                     arraySlice(ask_prices,1,20) AS ask_prices,
