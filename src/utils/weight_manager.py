@@ -9,7 +9,6 @@ class WeightManager:
     def save_weight(self,weight_dict,exchange_id:str,mkt_type:str,symbol:str,watch_type:str,date_str=None):
         path = self._get_filepath(exchange_id,mkt_type,symbol,watch_type,date_str)
         os.makedirs(os.path.dirname(path),exist_ok=True)
-
         with open(path,"w") as f:
             json.dump(weight_dict,f,indent=4)
 
@@ -22,8 +21,11 @@ class WeightManager:
             print(f"⚠️ 未找到权重文件: {path}")
             return None
         
-        with open(path,"r") as f:
-            return json.load(f)
+        try:
+            with open(path,"r") as f:
+                return json.load(f)
+        except:
+            return None
         
     @staticmethod
     def _get_filepath(exchange_id:str,mkt_type:str,symbol:str,watch_type:str,date_str=None):

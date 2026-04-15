@@ -34,11 +34,11 @@ class Consolidator:
                         arraySum(
                             arrayMap(
                                 (p,v) -> p * v,
-                                arraySlice(ask_prices,1,10),
-                                arraySlice(ask_volumes,1,10)
+                                arraySlice(ask_prices,1,20),
+                                arraySlice(ask_volumes,1,20)
                             )
                         ) /
-                        nullIf(arraySum(arraySlice(ask_volumes,1,10)),0)
+                        nullIf(arraySum(arraySlice(ask_volumes,1,20)),0)
                     ) AS sim_buy_price_avg,
                     ((sim_buy_price_avg / mid_price) - 1) * 10000 AS buy_impact_bps, 
                     arraySlice(bid_prices,1,20) AS bid_prices,

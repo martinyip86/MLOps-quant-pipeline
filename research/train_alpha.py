@@ -1,8 +1,10 @@
 from src.storage.clickhouse.client import ch_manager
 from src.utils.weight_manager import WeightManager
 from research.factor_analysis import AlphaResearch
+from research.backtest.vectorized import Vectorized
 from datetime import datetime,timedelta,timezone
 import polars as pl
+import numpy as np
 import glob
 
 class TrainAlpha:
@@ -28,11 +30,11 @@ class TrainAlpha:
                     arraySum(
                         arrayMap(
                             (p,v) -> p * v,
-                            arraySlice(ask_prices,1,10),
-                            arraySlice(ask_volumes,1,10)
+                            arraySlice(ask_prices,1,20),
+                            arraySlice(ask_volumes,1,20)
                         )
                     ) /
-                    nullIf(arraySum(arraySlice(ask_volumes,1,10)),0)
+                    nullIf(arraySum(arraySlice(ask_volumes,1,20)),0)
                 ) AS sim_buy_price_avg,
                 ((sim_buy_price_avg / mid_price) - 1) * 10000 AS buy_impact_bps
             FROM market_data.orderbook_{mkt_type}
@@ -60,22 +62,18 @@ class TrainAlpha:
         model_weight = WeightManager()
         old_weight = model_weight.load_weight(self.exchange_id,self.mkt_type,self.symbol,'orderbook')
 
-        final_dict = {}
-
-        for side in ["long","short"]:
-            final_dict[side] = {
-                **weights[side]
-            }
-
         if old_weight is not None:
             alpha = 0.2
-            for side in ["long","short"]:
-                for key in ["w_vamp","w_ofi"]:
-                    old_value = old_weight[side][key]
-                    new_value = final_dict[side][key]
-                    final_dict[side][key] = old_value * (1 - alpha) + new_value * alpha
+            old_coef = np.array(old_weight['coef'])
+            new_coef = np.array(weights['coef'])
+            weights['coef'] = (
+                old_coef * (1 - alpha) + new_coef * alpha
+            ).tolist()
 
-        path = model_weight.save_weight(final_dict,self.exchange_id,self.mkt_type,self.symbol,'orderbook')
+            weights['intercept'] = old_weight['intercept'] * (1 - alpha) + weights['intercept'] * alpha
+            weights['signal_scale'] = old_weight['signal_scale'] * (1 - alpha) + weights['signal_scale'] * alpha
+
+        path = model_weight.save_weight(weights,self.exchange_id,self.mkt_type,self.symbol,'orderbook')
         print(f"训练完成，模型已存至 {path}")
 
     def main(self):
@@ -92,11 +90,23 @@ class TrainAlpha:
 
         df = df_final.sort('timestamp').collect()
 
-        research = AlphaResearch(df)
-        research.compute_features().label_data().train_combined_signal()
+        n = len(df)
+        idx = int(n * 0.7)
+        train_df = df[:idx]
+        test_df = df[idx:]
+
+        research = AlphaResearch(train_df)
+        research.compute_features().label_data().select_best_lag().train_combined_signal()
 
         self._save_weight(research.weights)
 
+        test = AlphaResearch(test_df)
+        test.compute_features()
+        test_df = test.df
+
+        vectorized = Vectorized()
+        bt = vectorized.vectorized_backtest(test_df,research.weights)
+        vectorized.find_breakeven_threshold(bt)
 
 if __name__=='__main__':
     trainAlpha = TrainAlpha()

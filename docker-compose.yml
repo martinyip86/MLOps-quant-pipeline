@@ -95,6 +95,54 @@ services:
       clickhouse:
         condition: service_healthy
 
+  alpha-worker:
+    build: .
+    container_name: alpha-worker-server
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./src:/app/src
+    environment:
+      - PYTHONPATH=/app
+    command: python -m src.workers.alpha_worker
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    depends_on:
+      quant-redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  order-executor:
+    build: .
+    container_name: order-executor-server
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./src:/app/src
+    environment:
+      - PYTHONPATH=/app
+    command: python -m src.workers.order_executor
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    depends_on:
+      quant-redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
   ofelia:
     image: mcuadros/ofelia:latest
     container_name: quant-ofelia
@@ -114,6 +162,8 @@ services:
       ofelia.enabled: "true"
       ofelia.job-exec.daily_full_sync.schedule: "0 0 9 * * *"
       ofelia.job-exec.daily_full_sync.command: "python -m src.pipeline_runner"
+      ofelia.job-exec.daily_train_alpha.schedule: "0 0 10 * * *"
+      ofelia.job-exec.daily_train_alpha.command: "python -m research.train_alpha"
     tty: true
     stdin_open: true
 
