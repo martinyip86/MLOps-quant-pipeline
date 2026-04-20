@@ -3,6 +3,8 @@ from src.storage.clickhouse.client import ch_manager
 from src.utils.weight_manager import WeightManager
 from research.factor_analysis import AlphaResearch
 from research.backtest.vectorized import Vectorized
+from research.backtest.maker_vectorized import MakerVectorized
+from research.backtest.market_making_backtest import MarketMakingBacktest
 from datetime import datetime,timedelta,timezone
 import polars as pl
 import numpy as np
@@ -75,7 +77,7 @@ class TrainAlpha:
             weights['signal_scale'] = old_weight['signal_scale'] * (1 - alpha) + weights['signal_scale'] * alpha
 
         path = model_weight.save_weight(weights,self.exchange_id,self.mkt_type,self.symbol,'orderbook')
-        print(f"训练完成，模型已存至 {path}")
+        print(f"Traning completed,model save to {path}")
 
     def main(self):
         date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -102,12 +104,28 @@ class TrainAlpha:
         self._save_weight(research.weights)
 
         test = AlphaResearch(test_df)
-        test.compute_features()
-        test_df = test.df
+        test.compute_features().label_data()
+        test_df = test.df.drop_nulls()
 
-        vectorized = Vectorized()
-        bt = vectorized.vectorized_backtest(test_df,research.weights)
-        vectorized.find_breakeven_threshold(bt)
+        backtest = MarketMakingBacktest()
+        result = backtest.find_best_maker_threshold(test_df,research.weights)
+        df_res = pl.DataFrame(result)
+
+        optimized_results = df_res.filter((pl.col("avg_pnl_bp") > 1.2) & (pl.col("trade_count") >= 25)).sort('avg_pnl_bp',descending=True)
+
+        if optimized_results.is_empty():
+            print("backtest don't have 25 trading")
+            optimized_results = df_res.sort('total_pnl',descending=True)
+
+        best_row = optimized_results.head(1)
+        target_th = best_row["threshold"][0]
+        print(f"🚀 Final recommended params for living trading: Threshold={target_th}, avg pnl: {best_row['avg_pnl_bp'][0]}, trades count: {best_row['trade_count'][0]}, total pnl: {best_row['total_pnl'][0]}")
+        # maker_vectorized = MakerVectorized()
+        # result = maker_vectorized.find_best_maker_threshold(test_df,research.weights)
+        # print(result)
+        
+        # vectorized = Vectorized()
+        # vectorized.find_breakeven_threshold(test_df,research.weights)
 
 if __name__=='__main__':
     trainAlpha = TrainAlpha()
@@ -117,7 +135,7 @@ END
 
 factor_analysis.py:
 from src.analytics.indicators import calc_vamp_expr,calc_ofi_expr
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Ridge,LinearRegression
 from sklearn.preprocessing import StandardScaler
 from typing import Dict
 import polars as pl
@@ -127,9 +145,9 @@ class AlphaResearch:
     def __init__(self,df:pl.DataFrame):
         self.df = df
         self.best_lag = 20
-        self.lags = [10,20,30,50,100,150,200,300,400,500,600,700,800,900,1000,2000]
+        self.lags = [20, 30, 50, 100, 150, 200, 300, 500]
         self.weights:Dict = {}
-        self.scaler = StandardScaler()
+        self.best_metrics:dict = {}
 
     def compute_features(self,depth=5,window=20):
         self.df = self.df.with_columns([
@@ -154,7 +172,9 @@ class AlphaResearch:
 
         
     def select_best_lag(self):
-        best_ic = -999
+        results = []
+        estimated_cost_bp = (0.0002 * 10000) + 0.5
+        execution_delay = 2
         for lag in self.lags:
             target_col = f"target_{lag}_tick"
             valid_data = self.df.select(['vamp_bias','ofi','imbalance',target_col]).drop_nulls()
@@ -163,13 +183,48 @@ class AlphaResearch:
                 y = valid_data.select([target_col]).to_numpy().ravel()
                 model = LinearRegression()
                 model.fit(X,y)
-                pred = model.predict(X)
-                ic = np.corrcoef(pred,y)[0,1]
-                if abs(ic) > best_ic:
-                    best_ic = abs(ic)
-                    self.best_lag = lag
+                preds = model.predict(X)
+                ic = np.corrcoef(preds,y)[0,1]
 
-        print(f"🚀 最佳窗口: {self.best_lag} ticks (IC: {best_ic:.4f})")
+                avg_abs_pred = np.mean(np.abs(preds))
+
+                pnl_series = preds * y
+                pnl_mean = pnl_series.mean()
+                pnl_std = pnl_series.std()
+
+                sharpe = pnl_mean / pnl_std if pnl_std > 0 else 0
+
+                signal = np.sign(preds)
+                turnover = np.mean(np.abs(np.diff(signal)))
+
+                edge_ratio = pnl_mean / estimated_cost_bp
+
+                score = ic * sharpe * np.sqrt(lag) / (turnover + 0.01)
+                    
+                results.append({
+                    'lag': lag,
+                    'ic': ic,
+                    'edge_bp': pnl_mean,
+                    'sharpe': sharpe,
+                    'turnover': turnover,
+                    'score': score
+                })
+
+                print(
+                    f"Lag: {lag:4d} | IC: {ic:.4f} | Edge: {pnl_mean:.4f} | "
+                    f"Sharpe: {sharpe:.3f} | Score: {score:.5f}"
+                )
+
+        df_res = pl.DataFrame(results).sort('score',descending=True)
+
+        df_res = df_res.filter((pl.col("turnover") > 0.01) & (pl.col("turnover") < 0.15))
+
+        best = df_res.row(0,named=True)
+
+        self.best_lag = best['lag']
+
+        print("\n🏆 Best Lag Selection:")
+        print(df_res.head(5))
         return self
     
     def train_combined_signal(self,split_radio=0.7):
@@ -192,15 +247,15 @@ class AlphaResearch:
         X_train,X_valid = X[:split_idx],X[split_idx:]
         y_train,y_valid = y[:split_idx],y[split_idx:]
 
-        # self.scaler.fit(X_train)
-        # X_train = self.scaler.transform(X_train)
-        # X_valid = self.scaler.transform(X_valid)
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_valid_scaled = scaler.transform(X_valid)
 
-        model = LinearRegression()
-        model.fit(X_train,y_train)
+        model = Ridge(alpha=50.0)
+        model.fit(X_train_scaled,y_train)
 
-        pred_train = model.predict(X_train)
-        pred_valid = model.predict(X_valid)
+        pred_train = model.predict(X_train_scaled)
+        pred_valid = model.predict(X_valid_scaled)
 
         train_ic = np.corrcoef(pred_train,y_train)[0,1]
         valid_ic = np.corrcoef(pred_valid,y_valid)[0,1]
@@ -208,6 +263,8 @@ class AlphaResearch:
         signal = pred_valid
         signal_std = np.std(signal) + 1e-8
 
+        self.weights['scaler_mean'] = scaler.mean_.tolist()
+        self.weights['scaler_std'] = scaler.scale_.tolist()
         self.weights['coef'] = model.coef_.tolist()
         self.weights['intercept'] = float(model.intercept_)
         self.weights['best_lag'] = self.best_lag
@@ -216,10 +273,10 @@ class AlphaResearch:
         self.weights["train_ic"] = float(train_ic)
         self.weights["valid_ic"] = float(valid_ic)
     
-        print(f"✅ 训练完成")
+        print(f"✅ Training completed")
         print(f"Train IC: {train_ic:.4f}")
         print(f"Valid IC: {valid_ic:.4f}")
-        print(f"权重衰减率: {(train_ic - valid_ic)/train_ic:.2%}")
+        print(f"Weight decay rate: {(train_ic - valid_ic)/train_ic:.2%}")
         print(f"Signal Std: {signal_std:.4f}")
 
         return self
@@ -249,65 +306,113 @@ def calc_ofi_expr(window:int=20) -> pl.Series:
 
 END
 
-vectorized.py:
+market_making_backtest.py:
 import polars as pl
 import numpy as np
 
-class Vectorized:
-    def __init__(self):
-        pass
+class MarketMakingBacktest:
+    def __init__(self,max_inventory=10.0):
+        self.max_inventory = max_inventory
+        self.market_fee = 0.0010
+        self.slippage_bp = 3.0
 
-    def vectorized_backtest(self,df:pl.DataFrame,weights:dict,threshold:float=4.0):
-        """
-        基于你存储的 coef 和 intercept 进行回测
-        """
-        # 1. 重构特征 (这一步必须与训练时完全一致)
-        # 假设 df 已经包含了指标计算
-        
-        # 2. 计算组合信号 (Z-Score)
-        # 公式: (X * coef + intercept) / signal_scale
+    def backtest(self,df:pl.DataFrame,weights:dict,threshold:float=2.0,gamma=3.0,skew: float = 0.0002):
         coef = weights['coef']
         intercept = weights['intercept']
+        lag = weights['best_lag']
         scale = weights['signal_scale']
+
         df_bt = df.with_columns([
-            ((pl.col('vamp_bias') * coef[0] + pl.col('ofi') * coef[1] + pl.col('imbalance') * coef[2] + intercept) / scale).alias('z_score')
+            ((pl.col('vamp_bias') * coef[0] + pl.col('ofi') + coef[1] + pl.col('imbalance') * coef[2] + intercept) / scale).alias('z_score')
         ])
 
-        # 3. 模拟持仓 (核心：必须 shift(1) 避免前瞻偏差)
         df_bt = df_bt.with_columns([
-            (pl.when(pl.col('z_score') > threshold).then(1).when(pl.col('z_score') < -threshold).then(-1).otherwise(0)).alias('raw_pos')
-        ]).with_columns([
-            pl.col('raw_pos').shift(1).fill_null(0).alias('position')
+            (pl.col('z_score') > threshold).alias('quote_buy'),
+            (pl.col('z_score') < -threshold).alias('quote_sell')
         ])
 
-        # 4. 计算真实收益 (使用 Tick 级的变动)
-        # 注意：这里建议使用 mid_price 的百分比变动，而不是 target_lag
+        # df_bt = df_bt.with_columns([
+        #     pl.col('mid_price').diff().alias('price_change')
+        # ]).with_columns([
+        #     pl.when((pl.col('side_buy') == 1) & (pl.col('price_change') < 0)).then(1).otherwise(0).alias('filled_buy'),
+        #     pl.when((pl.col('side_sell') == -1) & (pl.col('price_change') > 0)).then(1).otherwise(0).alias('filled_sell')
+        # ])
+        spread = 2 / 10000
+
         df_bt = df_bt.with_columns([
-            (pl.col('position') * (pl.col('mid_price').diff() / pl.col('mid_price').shift(1))).alias('pnl_raw')
+            pl.col('mid_price').shift(-1).alias('next_mid')
         ])
 
-        # 5. 扣除手续费 (每当 position 变化时扣除)
-        fee_rate = 0.0002
-        df_bt = df_bt.with_columns([
-            (pl.col('position').diff().abs() * fee_rate).fill_null(0).alias('cost')
-        ]).with_columns([
-            (pl.col('pnl_raw') - pl.col('cost') + (pl.col('spread') / 2)).alias('pl_net')
+        z_scores = df_bt['z_score'].to_numpy()
+        mid = df_bt['mid_price'].to_numpy()
+        next_mid = df_bt['next_mid'].to_numpy()
+
+        quote_buy = df_bt['quote_buy'].to_numpy()
+        quote_sell = df_bt['quote_sell'].to_numpy()
+        
+        n = len(df_bt)
+
+        inventory = np.zeros(n)
+        current_inv = 0.0
+        pnl = np.zeros(n)
+
+        slippage = 3 / 10000
+
+        for i in range(n - 1):
+            inv_ratio = current_inv / self.max_inventory
+            
+            bid = mid[i] - spread / 2 - skew * inv_ratio
+            ask = mid[i] + spread / 2 - skew * inv_ratio
+
+            filled_buy = (next_mid[i] <= bid)
+            filled_sell = (next_mid[i] >= ask)
+            trade = False
+            trade_pnl = 0.0
+            if quote_buy[i] and filled_buy and current_inv < self.max_inventory:
+                current_inv += 1
+                trade_pnl -= spread / 2
+                trade = True
+
+            if quote_sell[i] and filled_sell and current_inv > -self.max_inventory:
+                current_inv -= 1
+                trade_pnl += spread / 2
+                trade = True
+
+            mtm = current_inv * (mid[i+1] - mid[i])
+
+            inventory[i] = current_inv
+            pnl[i] = trade_pnl + mtm - slippage * trade
+
+        df_bt =df_bt.with_columns([
+            pl.Series(name='inventory',values=inventory),
+            pl.Series(name='step_pnl',values=pnl)
         ])
-        print(f"当前模型最大信号强度: {df_bt['z_score'].abs().max()}")
-        print(f"累计净收益: {df_bt['pl_net'].sum():.4%}")
+
+        # print(f"--- maker backtest (Th: {threshold}, MaxInv: {self.max_inventory}, Gamma: {gamma}) ---")
+        # print(f"Total pnl: {df_bt['step_pnl'].sum():.4%}")
+        # print(f"Max inventory: {df_bt['inventory'].max()} | Min inventory: {df_bt['inventory'].min()}")
+        # print(f"Avg inventory: {df_bt['inventory'].abs().mean():.2f}")
+        
         return df_bt
     
-    def find_breakeven_threshold(self,df:pl.DataFrame,fee_bps=4.0):
+    def find_best_maker_threshold(self, df: pl.DataFrame,weights:dict):
         results = []
+        thresholds = np.arange(0.5, 2.5, 0.25)
+        for th in thresholds:
+            bt = self.backtest(df,weights,th)
 
-        for th in np.arange(4.0,10.0,0.5):
-            trades = df.filter(pl.col('z_score').abs() > th)
-            if len(trades) == 0: continue
+            pnl = bt['step_pnl'].sum()
+            trades = bt.filter(pl.col('step_pnl') != 0).height
+            avg_pnl = pnl / trades if trades > 0 else 0
 
-            avg_alpha = trades['pnl_raw'].mean() * 10000
-            net_pnl = (avg_alpha - fee_bps) * len(trades)
+            results.append({
+                "threshold": th,
+                "total_pnl": pnl,
+                "trade_count": trades,
+                "avg_pnl_bp": avg_pnl * 10000
+            })
 
-            print(f"Th: {th:.1f} | 交易次数: {len(trades)} | 单笔Alpha: {avg_alpha:.2f}bp | 净收益: {net_pnl:.2f}")
+        return results
 
 END
 

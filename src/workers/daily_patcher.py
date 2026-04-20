@@ -34,7 +34,7 @@ class DailyPatcher:
 
     def setup(self):
         """Initializes database connectivity."""
-        self.ch_client = ch_manager.connect
+        self.ch_client = ch_manager.connect('hk')
 
     def check_data_exists(self,target_date_str:str,exchange_id,symbol):
         """
@@ -102,6 +102,8 @@ class DailyPatcher:
                         try:
                             self.sync_to_clickhouse(gaps_df)
                             self.logger.info(f"✅ [PATCHED] Injected {len(gaps_df)} missing records into {exchange_id} {symbol}.")
+                            sql = f"OPTIMIZE TABLE market_data.traees_spot PARTITION '{self.date_str}' FINAL"
+                            self.ch_client.command(sql)
                             time.sleep(1)
                                 
                         except Exception as e:
@@ -211,16 +213,21 @@ class DailyPatcher:
 
     def sync_to_clickhouse(self,df:pl.DataFrame):
         """Performs batch insertion into ClickHouse."""
-        arrow_table = df.to_arrow()
-        self.logger.info(f"🚀 [SYNC] Pushing {len(df)} records to ClickHouse.")
-        try:
-            self.ch_client.insert_arrow(
-                table='trades_spot',
-                arrow_table=arrow_table
-            )
-        except Exception as e:
-            self.logger.error(f"🚨 [DB-ERROR] Insertion failed: {e}")
-            raise
+        chunk_size = 100000
+        total_row = len(df)
+
+        for i in range(0,total_row,chunk_size):
+            chunk = df.slice(i,chunk_size)
+            self.logger.info(f"🚀 [SYNC] Pushing chunk {i//chunk_size + 1} ({len(chunk)} rows)")
+            try:
+                self.ch_client.insert_arrow(
+                    table='trades_spot',
+                    arrow_table=chunk.to_arrow()
+                )
+                time.sleep(1)
+            except Exception as e:
+                self.logger.error(f"🚨 [DB-ERROR] Insertion failed: {e}")
+                raise
 
     def verify_full_integrity(self,exchange_id,symbol,official_df:pl.DataFrame,file_path,max_trade_id,min_trade_id):
         """

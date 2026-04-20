@@ -1,5 +1,7 @@
 from src.storage.clickhouse.client import ch_manager
 from src.utils.logger import setup_logger
+from src.workers.feature_processor import FeatureProcessor
+import polars as pl
 import os
 import gc
 from datetime import datetime,timedelta,timezone
@@ -71,7 +73,7 @@ class Consolidator:
 
     def setup(self):
         """Initializes database connection."""
-        self.ch_client = ch_manager.connect
+        self.ch_client = ch_manager.connect('hk')
 
     def daily_feature_consolidation(self,symbol:str,exchange_id:str,mkt_type:str,data_type:str,current_date:str):
         """
@@ -83,49 +85,58 @@ class Consolidator:
 
         # Standardized hierarchical storage structure
         dir_path = os.path.join(
-            "data/processed",
+            "data/raw",
             exchange_id,
             mkt_type,
             clear_symbol,
-            data_type
+            data_type,
+            target_date_obj.strftime('%Y'),
+            target_date_obj.strftime('%m'),
+            target_date_obj.strftime('%d'),
         )
         os.makedirs(dir_path,exist_ok=True)
-        file_path = os.path.join(
-            dir_path,
-            f"{target_date_obj.strftime('%Y%m%d')}.parquet"
-        )
+        
+        start_ms = int(target_date_obj.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        # end_ms = start_ms + (24 * 60 * 60 * 1000) - 1
+        for hour in range(24):
+            h_start = start_ms + (hour * 3600 * 1000)
+            h_end = h_start + (3600 * 1000) - 1
 
-        # Cleanup corrupt/empty files from previous runs
-        if os.path.exists(file_path):
-            size_mb = os.path.getsize(file_path) / (1024 * 1024)
-            if size_mb < 1:
-                os.remove(file_path)
+            file_path = os.path.join(
+                dir_path,
+                f"{target_date_obj.strftime('%Y%m%d')}_h{hour:02d}.parquet"
+            )
 
-        if not os.path.exists(file_path):
-            start_ms = int(target_date_obj.replace(tzinfo=timezone.utc).timestamp() * 1000)
-            end_ms = start_ms + (24 * 60 * 60 * 1000) - 1
-
-            # Leveraging ClickHouse S3/File integration for high-speed export
-            sql = f"""
-                INSERT INTO FUNCTION file('{file_path}','Parquet')
-                SELECT
-                    {self.fields[data_type]}
-                FROM {table_name} FINAL
-                WHERE symbol='{symbol}' 
-                    AND exchange_id='{exchange_id}' 
-                    AND mkt_type='{mkt_type}'
-                    AND timestamp >= {start_ms}
-                    AND timestamp <= {end_ms}
-                ORDER BY {self.sort_keys[data_type]} ASC
-            """
-            try:
-                self.logger.info(f"📊 Consolidating features: {exchange_id} {symbol} @ {current_date}")
-                self.ch_client.command(sql)
+            # Cleanup corrupt/empty files from previous runs
+            if os.path.exists(file_path):
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
-                self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
-            except Exception as e:
-                self.logger.error(f"❌ Export failed: {e}")
-                raise
+                if size_mb < 1:
+                    os.remove(file_path)
+
+            if not os.path.exists(file_path):
+                # Leveraging ClickHouse S3/File integration for high-speed export
+                sql = f"""
+                    SELECT
+                        {self.fields[data_type]}
+                    FROM {table_name}
+                    WHERE symbol='{symbol}' 
+                        AND exchange_id='{exchange_id}' 
+                        AND mkt_type='{mkt_type}'
+                        AND timestamp >= {h_start}
+                        AND timestamp <= {h_end}
+                    ORDER BY {self.sort_keys[data_type]} ASC
+                """
+                try:
+                    self.logger.info(f"📊 Consolidating features: {exchange_id} {symbol} @ {current_date}")
+                    table_arrow = self.ch_client.query_arrow(sql)
+                    df = pl.from_arrow(table_arrow)
+                    df.write_parquet(file_path)
+                    del df
+                    size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                    self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
+                except Exception as e:
+                    self.logger.error(f"❌ Export failed: {e}")
+                    raise
 
         gc.collect() # Explicit garbage collection to manage large memory frames
 
@@ -134,6 +145,8 @@ class Consolidator:
         self.setup()
 
         is_automated = self.target_date is None
+
+        feature_processor = FeatureProcessor()
 
         for exchange_id in self.exchanges:
             # Handle time-zone offsets for different exchanges
@@ -152,6 +165,14 @@ class Consolidator:
                             mkt_type=mkt_type,
                             data_type=data_type,
                             current_date=current_date
+                        )
+                        feature_processor.process_daily_data(
+                            exchange_id=exchange_id,
+                            mkt_type=mkt_type,
+                            symbol=symbol,
+                            watch_type=data_type,
+                            date_str=current_date,
+                            logger=self.logger
                         )
 
 def consolidator(target_date: str=None):

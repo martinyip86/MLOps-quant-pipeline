@@ -8,10 +8,9 @@ class ClickhouseManager:
     def __init__(self):
         self._ch_client = None
 
-    @property
-    def connect(self):
+    def connect(self,host='local'):
         if self._ch_client is None:
-            host = os.getenv('CLICKHOUSE_HOST')
+            host = os.getenv('CLICKHOUSE_HOST' if host == 'local' else 'HK_HOST')
             port = os.getenv('CLICKHOUSE_PORT')
             username = os.getenv('CLICKHOUSE_USERNAME')
             password = os.getenv('CLICKHOUSE_PASSWORD')

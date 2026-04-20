@@ -11,7 +11,7 @@ import time
 class Syncer:
     def __init__(self):
         self.redis = redis_manager.connect
-        self.ch = ch_manager.connect
+        self.ch = ch_manager.connect()
         self.streaming_keys = {}
         self.logger = setup_logger(
             name="worker_syncer",
