@@ -1,82 +1,177 @@
 from src.analytics.indicators import calc_vamp_expr,calc_ofi_expr
-from sklearn.linear_model import Ridge,LinearRegression
+from sklearn.linear_model import Ridge,HuberRegressor
 from sklearn.preprocessing import StandardScaler
-from typing import Dict
+from lightgbm import LGBMRegressor,early_stopping,log_evaluation
+from scipy.stats import pearsonr
 import polars as pl
 import numpy as np
+import sys
 
 class AlphaResearch:
     def __init__(self,df:pl.DataFrame):
         self.df = df
         self.best_lag = 20
-        self.lags = [20, 30, 50, 100, 150, 200, 300, 500]
-        self.weights:Dict = {}
+        self.lags = [20,40,60,80,100]
+        self.weights:dict = {}
         self.best_metrics:dict = {}
 
     def compute_features(self,depth=5,window=20):
         self.df = self.df.with_columns([
             calc_vamp_expr(depth=depth),
-            calc_ofi_expr(window=window)
+            calc_ofi_expr()
         ]).with_columns([
             ((pl.col('vamp') - pl.col('micro_price')) / pl.col('micro_price') * 10000).alias('vamp_bias'),
             (pl.col('net_volume_1s') / (pl.col('trade_count_1s') + 1)).alias('norm_net_vol'),
-            (pl.col('price_drift_1s') * 10000).alias('trade_drift_bp'),
+            (pl.col('price_drift_1s').shift(1) * 10000).alias('trade_drift_bp'),
             (pl.col('imbalance') * pl.col('net_volume_1s').sign()).alias('imb_trade_corr')
+        ]).with_columns([
+            pl.col('mid_price').rolling_std(window_size=100).fill_null(strategy='forward').alias('fast_vol'),
+            pl.col('mid_price').rolling_std(window_size=2000).fill_null(strategy='forward').alias('slow_vol')
+        ]).with_columns([
+            ((pl.col('bid_prices').list.slice(0,20) * pl.col('bid_volumes').list.slice(0,20)).list.sum() / (pl.col('bid_volumes').list.slice(0,20).list.sum() + 1e-8)).alias('sim_buy_avg')
+        ]).with_columns([
+            ((pl.col('sim_buy_avg') / pl.col('mid_price') - 1) * 10000).alias('buy_impact_bps')
+        ])
+        self.df = self.df.drop_nans()
+        for depth in [10]:
+            self.df = self.df.with_columns([
+                ((pl.col('bid_volumes').list.slice(0,depth).list.sum() - pl.col('ask_volumes').list.slice(0,depth).list.sum()) / (pl.col('bid_volumes').list.slice(0,depth).list.sum() + pl.col('ask_volumes').list.slice(0,depth).list.sum() + 1e-8)).alias(f"imbalance_d{depth}")
+            ])
+
+        for window in [100]:
+            self.df = self.df.with_columns([
+                pl.col('ofi').rolling_mean(window_size=window).alias(f'ofi_mean{window}')
+            ])
+
+        self.df = self.df.with_columns([
+            pl.col('vamp_bias').rolling_std(50).alias('vamp_bias_vol')
+        ])
+
+        self.df = self.df.with_columns([
+            ((pl.col('micro_price') - pl.col('mid_price')) / pl.col('mid_price') * 10000).alias('micro_vs_mid_bp'),
+            (((pl.col('micro_price') - pl.col('mid_price')).rolling_mean(100)) / pl.col('mid_price') * 10000).alias('micro_reversion')
+        ])
+
+        self.df = self.df.with_columns([
+            (pl.col('bid_volumes').list.slice(0,5).list.sum() / pl.col('bid_volumes').list.slice(0,20).list.sum()).alias('bid_depth_attenuation_ratio'),
+            (pl.col('ask_volumes').list.slice(0,5).list.sum() / pl.col('ask_volumes').list.slice(0,20).list.sum()).alias('ask_depth_attenuation_ratio')
+        ])
+
+        self.df = self.df.with_columns([
+            (pl.col('spread') / pl.col('micro_price') * 10000).alias('spread_bp')
         ])
         return self
     
     def label_data(self):
-        fee = 2 * 0.0002 * 10000
-        # self.df = self.df.with_columns([
-        #     pl.col('mid_price').pct_change().rolling_std(window_size=100).alias('volatility')
-        # ])
-
         for lag in self.lags:
-            future_micro_avg = pl.col('micro_price').shift(-lag).rolling_mean(window_size=20)
+            future_micro_avg = pl.col('micro_price').rolling_mean(window_size=20).shift(-lag)
+            future_micro_ewm = pl.col('micro_price').ewm_mean(span=lag//2,adjust=False).shift(-lag)
+            future_micro_max = pl.col('micro_price').shift(-lag).rolling_max(window_size=lag)
+            future_micro_min = pl.col('micro_price').shift(-lag).rolling_min(window_size=lag)
+
+            current_price = pl.col('micro_price')
+
+            max_ret = (future_micro_max / current_price - 1) * 10000
+            min_ret = (future_micro_min / current_price - 1) * 10000
 
             self.df = self.df.with_columns([
-                ((future_micro_avg / pl.col('micro_price') - 1) * 10000).alias(f"target_{lag}_std_return")
+                # ((future_micro_avg / pl.col('micro_price') - 1) * 10000).alias(f"target_{lag}")
+                # ((future_micro_ewm / pl.col('micro_price') - 1) * 10000).alias(f'target_{lag}')
+                pl.when((max_ret > 2.0) & (min_ret > -1.0)).then(max_ret).otherwise(0.0).alias(f"target_{lag}")
             ])
 
         self.df = self.df.drop_nulls()
 
         return self
 
+    def select_best_lag_for_ticker(self):
+        results = []
+        estimated_cost_bp = 0.5
+        cols_to_check = ['imbalance','imbalance_d10','ofi_mean100','vamp_bias_vol','micro_vs_mid_bp','micro_reversion','spread_bp',"htf_trend_ratio", "dist_to_support", "is_sweep"]
+            
         
     def select_best_lag(self):
         results = []
-        estimated_cost_bp = (0.0002 * 10000) + 0.5
-        execution_delay = 2
-        cols_to_check = ['vamp_bias','ofi','imbalance','norm_net_vol', 'trade_drift_bp']
+        # estimated_cost_bp = (0.0002 * 10000) + 0.5
+        estimated_cost_bp = 0
+        # cols_to_check = ['vamp_bias','imbalance','imbalance_d5','imbalance_d10','imbalance_d20','ofi_mean10','ofi_mean20','ofi_mean30','ofi_mean60','vamp_bias_mom','vamp_bias_vol','micro_vs_mid_bp','micro_reversion','bid_depth_attenuation_ratio','ask_depth_attenuation_ratio','spread_bp','spread_bp_change_pct','spread_bp_ma5_diff','buy_impact_bps',"htf_trend_ratio", "dist_to_support", "is_sweep"]
+        cols_to_check = ['imbalance','imbalance_d10','ofi_mean100','vamp_bias_vol','micro_vs_mid_bp','micro_reversion','spread_bp',"htf_trend_ratio", "dist_to_support", "is_sweep"]
         for lag in self.lags:
-            target_col = [f"target_{lag}_std_return"]
-            valid_data = (
+            target_col = [f"target_{lag}"]
+            data = (
                 self.df.select(cols_to_check + target_col)
                 .filter(pl.all_horizontal(pl.col("*").is_not_null())) # 剔除空值
                 .filter(pl.all_horizontal(pl.col("*").is_finite()))   # 剔除 Inf
             )
-            if len(valid_data) > 1000:
-                X = valid_data.select(cols_to_check).to_numpy()
-                y = valid_data.select(target_col).to_numpy().ravel()
-                model = LinearRegression()
-                model.fit(X,y)
-                preds = model.predict(X)
-                ic = np.corrcoef(preds,y)[0,1]
+            print(f"len: {len(data)}")
+            if len(data) > 1000:
+                n = len(data)
+                idx = int(n * 0.7)
+                X = data.select(cols_to_check).to_pandas()
+                y = data.select(target_col).to_pandas().values.ravel()
 
-                avg_abs_pred = np.mean(np.abs(preds))
+                X_train,X_valid = X.iloc[:idx],X.iloc[idx:]
+                y_train,y_valid = y[:idx],y[idx:]
 
-                pnl_series = preds * y
+                scaler = StandardScaler()
+                X_train_scaler = scaler.fit_transform(X_train)
+                X_valid_scaler = scaler.transform(X_valid)
+
+                huber_model = HuberRegressor(max_iter=2000)
+                huber_model.fit(X_train_scaler,y_train)
+                huber_preds = huber_model.predict(X_valid_scaler)
+
+                lgb_model = LGBMRegressor(
+                    n_estimators=300,
+                    max_depth=5,
+                    num_leaves=31,
+                    learning_rate=0.03,
+                    min_child_samples=20,
+                    min_split_gain=0.0,
+                    min_child_weight=0.001,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    random_state=42,
+                    verbose=-1,
+                    importance_type="gain"
+                )
+                lgb_model.fit(
+                    X_train,
+                    y_train,
+                    eval_set=[(X_valid,y_valid)],
+                    callbacks=[early_stopping(50), log_evaluation(0)]
+                )
+                lgb_preds = lgb_model.predict(X_valid)
+
+                feat_imp = pl.DataFrame({
+                    'feature':cols_to_check,
+                    'importance':lgb_model.feature_importances_
+                })
+
+                feat_imp = feat_imp.sort('importance',descending=True)
+                print("特征重要性")
+                for row in feat_imp.rows():
+                    print(f"{row[0]}:{row[1]}")
+
+                final_preds = (huber_preds * 0.4) + (lgb_preds * 0.6)
+
+                ic,p_value = pearsonr(final_preds,y_valid)
+
+                signal = np.sign(final_preds)
+                turnover = np.mean(np.abs(np.diff(signal))) / 2
+
+                pnl_series = signal * y_valid
                 pnl_mean = pnl_series.mean()
                 pnl_std = pnl_series.std()
 
-                sharpe = pnl_mean / pnl_std if pnl_std > 0 else 0
+                sharpe = (pnl_mean - estimated_cost_bp) / pnl_std if pnl_std > 0 else 0
 
-                signal = np.sign(preds)
-                turnover = np.mean(np.abs(np.diff(signal)))
-
-                edge_ratio = pnl_mean / estimated_cost_bp
-
-                score = ic * sharpe * np.sqrt(lag) / (turnover + 0.01)
+                if p_value < 0.01:
+                    score = ic * sharpe * np.sqrt(lag) / (turnover + 0.01)
+                else:
+                    score = 0
                     
                 results.append({
                     'lag': lag,
@@ -89,24 +184,24 @@ class AlphaResearch:
 
                 print(
                     f"Lag: {lag:4d} | IC: {ic:.4f} | Edge: {pnl_mean:.4f} | "
-                    f"Sharpe: {sharpe:.3f} | Score: {score:.5f}"
+                    f"Sharpe: {sharpe:.3f} | Score: {score:.5f} | P-Value: {p_value:.4f}"
                 )
 
         df_res = pl.DataFrame(results).sort('score',descending=True)
 
         df_res = df_res.filter((pl.col("turnover") > 0.01) & (pl.col("turnover") < 0.15))
+        if not df_res.is_empty():
+            best = df_res.row(0,named=True)
 
-        best = df_res.row(0,named=True)
+            self.best_lag = best['lag']
 
-        self.best_lag = best['lag']
-
-        print("\n🏆 Best Lag Selection:")
-        print(df_res.head(5))
+            print("\n🏆 Best Lag Selection:")
+            print(df_res.head(5))
         return self
     
     def train_combined_signal(self,split_radio=0.7):
-        selected_features = ["vamp_bias","ofi","imbalance","norm_net_vol","trade_drift_bp"]
-        target_col = [f"target_{self.best_lag}_std_return"]
+        selected_features = ["vamp_bias","ofi","imbalance","htf_trend_ratio", "dist_to_support", "is_sweep"]
+        target_col = [f"target_{self.best_lag}"]
 
         full_df = self.df.select(selected_features + target_col).drop_nulls()
         full_df = full_df.filter(pl.all_horizontal(pl.col('*').is_finite() & pl.all_horizontal(pl.col("*").is_finite())))

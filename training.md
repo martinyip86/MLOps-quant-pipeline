@@ -50,7 +50,7 @@ class TrainAlpha:
         arrow_table = self.ch.query_arrow(sql)
         return pl.from_arrow(arrow_table).lazy()
     
-    def loca_historical_data(self,days:int=10):
+    def loca_historical_data(self,days:int=5):
         symbol = self.symbol.replace('/','-')
         files_path = f"data/processed/{self.exchange_id}/{self.mkt_type}/{symbol}/orderbook/*.parquet"
         files = sorted(glob.glob(files_path))[-days:]
@@ -60,6 +60,33 @@ class TrainAlpha:
             return None
         
         return pl.scan_parquet(files).select(['timestamp','bid_prices','bid_volumes','ask_prices','ask_volumes','micro_price','imbalance','spread','mid_price','sim_buy_price_avg','buy_impact_bps'])
+    
+    def _get_today_trades(self,exchange_id:str,mkt_type:str,symbol:str,date_str:str):
+        sql = f"""
+            SELECT
+                price,
+                amount,
+                side,
+                timestamp
+            FROM market_data.trades_{mkt_type}
+            WHERE exchange_id='{exchange_id}'
+                AND symbol='{symbol}'
+                AND toDate(fromUnixTimestamp64Milli(timestamp)) = '{date_str}'
+            ORDER BY timestamp ASC
+        """
+        arrow_table = self.ch.query_arrow(sql)
+        return pl.from_arrow(arrow_table).lazy()
+    
+    def loca_historical_trades(self,days:int=5):
+        symbol = self.symbol.replace('/','-')
+        file_path = f"data/processed/{self.exchange_id}/{self.mkt_type}/{symbol}/trades/*.parquet"
+        files = sorted(glob.glob(file_path))[-days:]
+
+        if not files:
+            print("files aren't exists")
+            return None
+        
+        return pl.scan_parquet(files).select(['price','amount','side','timestamp'])
     
     def _save_weight(self,weights):
         model_weight = WeightManager()
@@ -81,17 +108,23 @@ class TrainAlpha:
 
     def main(self):
         date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        self.ch = ch_manager.connect
+        self.ch = ch_manager.connect()
 
-        df_today = self._get_today_data(self.exchange_id,self.mkt_type,self.symbol,date_str)
-        df_history = self.loca_historical_data()
+        df_final_ob = self.loca_historical_data()
 
-        if df_history is not None:
-            df_final = pl.concat([df_history,df_today])
-        else:
-            df_final = df_today
+        df_final_ob = df_final_ob.sort('timestamp')
 
-        df = df_final.sort('timestamp').collect()
+        df_final_trades = self.loca_historical_trades()
+
+        df_final_trades = df_final_trades.sort('timestamp').rolling(index_column='timestamp',period="1000i").agg([
+            pl.col('amount').filter(pl.col('side') == 'buy').sum().fill_null(0).alias('buy_vol_1s'),
+            pl.col('amount').filter(pl.col('side') == 'sell').sum().fill_null(0).alias('sell_vol_1s'),
+            (pl.col('amount') * pl.when(pl.col('side') == 'buy').then(1).otherwise(-1)).sum().alias('net_volume_1s'),
+            pl.len().alias('trade_count_1s'),
+            ((pl.col('price').mean() / pl.col('price').last()) - 1).alias('price_drift_1s')
+        ])
+
+        df = df_final_ob.join_asof(df_final_trades,on='timestamp',strategy="backward").collect()
 
         n = len(df)
         idx = int(n * 0.7)
@@ -107,30 +140,49 @@ class TrainAlpha:
         test.compute_features().label_data()
         test_df = test.df.drop_nulls()
 
-        backtest = MarketMakingBacktest()
-        result = backtest.find_best_maker_threshold(test_df,research.weights)
-        df_res = pl.DataFrame(result)
+        backtest = MarketMakingBacktest(max_inventory=5.0)
 
-        optimized_results = df_res.filter((pl.col("avg_pnl_bp") > 1.2) & (pl.col("trade_count") >= 25)).sort('avg_pnl_bp',descending=True)
+        results = []
+        for th in np.arange(1.0,2.5,0.5):
+            for skew in [0.2,0.5,1.0]:
+                res_df = backtest.backtest(test_df,research.weights,th,skew)
 
-        if optimized_results.is_empty():
-            print("backtest don't have 25 trading")
-            optimized_results = df_res.sort('total_pnl',descending=True)
+                total_pnl = res_df['step_pnl'].sum()
+                trade_count = res_df.filter(pl.col('trade_side') != 0).height
 
-        best_row = optimized_results.head(1)
-        target_th = best_row["threshold"][0]
-        print(f"🚀 Final recommended params for living trading: Threshold={target_th}, avg pnl: {best_row['avg_pnl_bp'][0]}, trades count: {best_row['trade_count'][0]}, total pnl: {best_row['total_pnl'][0]}")
-        # maker_vectorized = MakerVectorized()
-        # result = maker_vectorized.find_best_maker_threshold(test_df,research.weights)
-        # print(result)
-        
-        # vectorized = Vectorized()
-        # vectorized.find_breakeven_threshold(test_df,research.weights)
+                avg_mid = res_df['mid_price'].mean()
+                avg_pnl_bp = (total_pnl / (avg_mid * trade_count)) * 10000
+
+                win_rate = (res_df['step_pnl'] > 0).mean()
+
+                # 计算夏普比率 (基于 step_pnl 的波动)
+                daily_std = res_df['step_pnl'].std()
+                sharpe = (res_df['step_pnl'].mean() / daily_std * np.sqrt(len(res_df))) if daily_std > 0 else 0
+
+                cum_pnl = res_df['step_pnl'].cum_sum()
+                max_pnl = cum_pnl.cum_max()
+                drawdown = max_pnl - cum_pnl
+                max_dd = drawdown.max()
+
+                results.append({
+                    "threshold": th,
+                    "skew": skew,
+                    "total_pnl": total_pnl,
+                    "trade_count": trade_count,
+                    "avg_pnl_bp": avg_pnl_bp,
+                    "sharpe": sharpe,
+                    "max_drawdown": max_dd,
+                    "win_rate": win_rate,
+                    "avg_abs_inventory": res_df["inventory"].abs().mean()
+                })
+
+        # 3. 打印最优结果
+        best_res = sorted(results, key=lambda x: x['total_pnl'], reverse=True)[0]
+        print(f"Final Selection: {best_res}")
 
 if __name__=='__main__':
     trainAlpha = TrainAlpha()
     trainAlpha.main()
-
 END
 
 factor_analysis.py:
@@ -154,19 +206,27 @@ class AlphaResearch:
             calc_vamp_expr(depth=depth),
             calc_ofi_expr(window=window)
         ]).with_columns([
-            ((pl.col('vamp') - pl.col('micro_price')) / pl.col('micro_price') * 10000).alias('vamp_bias')
+            ((pl.col('vamp') - pl.col('micro_price')) / pl.col('micro_price') * 10000).alias('vamp_bias'),
+            (pl.col('net_volume_1s') / (pl.col('trade_count_1s') + 1)).alias('norm_net_vol'),
+            (pl.col('price_drift_1s') * 10000).alias('trade_drift_bp'),
+            (pl.col('imbalance') * pl.col('net_volume_1s').sign()).alias('imb_trade_corr')
         ])
         return self
     
     def label_data(self):
         fee = 2 * 0.0002 * 10000
+        # self.df = self.df.with_columns([
+        #     pl.col('mid_price').pct_change().rolling_std(window_size=100).alias('volatility')
+        # ])
 
         for lag in self.lags:
-            future_micro = pl.col('micro_price').shift(-lag)
+            future_micro_avg = pl.col('micro_price').shift(-lag).rolling_mean(window_size=20)
 
             self.df = self.df.with_columns([
-                (((future_micro - pl.col('micro_price')) / pl.col('micro_price')) * 10000).alias(f"target_{lag}_tick")
+                ((future_micro_avg / pl.col('micro_price') - 1) * 10000).alias(f"target_{lag}_std_return")
             ])
+
+        self.df = self.df.drop_nulls()
 
         return self
 
@@ -175,12 +235,17 @@ class AlphaResearch:
         results = []
         estimated_cost_bp = (0.0002 * 10000) + 0.5
         execution_delay = 2
+        cols_to_check = ['vamp_bias','ofi','imbalance','norm_net_vol', 'trade_drift_bp']
         for lag in self.lags:
-            target_col = f"target_{lag}_tick"
-            valid_data = self.df.select(['vamp_bias','ofi','imbalance',target_col]).drop_nulls()
+            target_col = [f"target_{lag}_std_return"]
+            valid_data = (
+                self.df.select(cols_to_check + target_col)
+                .filter(pl.all_horizontal(pl.col("*").is_not_null())) # 剔除空值
+                .filter(pl.all_horizontal(pl.col("*").is_finite()))   # 剔除 Inf
+            )
             if len(valid_data) > 1000:
-                X = valid_data.select(['vamp_bias','ofi','imbalance']).to_numpy()
-                y = valid_data.select([target_col]).to_numpy().ravel()
+                X = valid_data.select(cols_to_check).to_numpy()
+                y = valid_data.select(target_col).to_numpy().ravel()
                 model = LinearRegression()
                 model.fit(X,y)
                 preds = model.predict(X)
@@ -228,11 +293,14 @@ class AlphaResearch:
         return self
     
     def train_combined_signal(self,split_radio=0.7):
-        selected_features = ["vamp_bias","ofi","imbalance"]
-        target_col = [f"target_{self.best_lag}_tick"]
+        selected_features = ["vamp_bias","ofi","imbalance","norm_net_vol","trade_drift_bp"]
+        target_col = [f"target_{self.best_lag}_std_return"]
 
         full_df = self.df.select(selected_features + target_col).drop_nulls()
-        full_df = full_df.filter(pl.all_horizontal(pl.col('*').is_finite()))
+        full_df = full_df.filter(pl.all_horizontal(pl.col('*').is_finite() & pl.all_horizontal(pl.col("*").is_finite())))
+
+        desc = full_df.select(target_col).describe()
+        print(f"📊 Label 统计信息: \n{desc}")
 
         if len(full_df) < 1000:
             print(f"⚠️ [有效样本不足 ({len(full_df)})，跳过训练")
@@ -269,7 +337,7 @@ class AlphaResearch:
         self.weights['intercept'] = float(model.intercept_)
         self.weights['best_lag'] = self.best_lag
         self.weights["features"] = selected_features
-        self.weights["signal_scale"] = float(signal_std)
+        self.weights["signal_scale"] = signal_std
         self.weights["train_ic"] = float(train_ic)
         self.weights["valid_ic"] = float(valid_ic)
     
@@ -306,113 +374,96 @@ def calc_ofi_expr(window:int=20) -> pl.Series:
 
 END
 
-market_making_backtest.py:
 import polars as pl
 import numpy as np
 
 class MarketMakingBacktest:
-    def __init__(self,max_inventory=10.0):
+    def __init__(self,max_inventory=10.0,tick_size=0.1):
         self.max_inventory = max_inventory
-        self.market_fee = 0.0010
-        self.slippage_bp = 3.0
+        self.tick_size = tick_size
+        self.market_fee_bp = 0.1
+        self.slippage_bp = 0.2
 
-    def backtest(self,df:pl.DataFrame,weights:dict,threshold:float=2.0,gamma=3.0,skew: float = 0.0002):
-        coef = weights['coef']
+    def backtest(self,df:pl.DataFrame,weights:dict,threshold:float=1.5,skew_factor: float = 0.5):
+        coef = np.array(weights['coef'])
+        means = np.array(weights['scaler_mean'])
+        stds = np.array(weights['scaler_std'])
         intercept = weights['intercept']
-        lag = weights['best_lag']
         scale = weights['signal_scale']
-
-        df_bt = df.with_columns([
-            ((pl.col('vamp_bias') * coef[0] + pl.col('ofi') + coef[1] + pl.col('imbalance') * coef[2] + intercept) / scale).alias('z_score')
-        ])
-
-        df_bt = df_bt.with_columns([
-            (pl.col('z_score') > threshold).alias('quote_buy'),
-            (pl.col('z_score') < -threshold).alias('quote_sell')
-        ])
-
-        # df_bt = df_bt.with_columns([
-        #     pl.col('mid_price').diff().alias('price_change')
-        # ]).with_columns([
-        #     pl.when((pl.col('side_buy') == 1) & (pl.col('price_change') < 0)).then(1).otherwise(0).alias('filled_buy'),
-        #     pl.when((pl.col('side_sell') == -1) & (pl.col('price_change') > 0)).then(1).otherwise(0).alias('filled_sell')
-        # ])
-        spread = 2 / 10000
-
-        df_bt = df_bt.with_columns([
-            pl.col('mid_price').shift(-1).alias('next_mid')
-        ])
-
-        z_scores = df_bt['z_score'].to_numpy()
-        mid = df_bt['mid_price'].to_numpy()
-        next_mid = df_bt['next_mid'].to_numpy()
-
-        quote_buy = df_bt['quote_buy'].to_numpy()
-        quote_sell = df_bt['quote_sell'].to_numpy()
         
-        n = len(df_bt)
+        vamp_bias = df['vamp_bias'].to_numpy()
+        ofi = df['ofi'].to_numpy()
+        imbalance = df['imbalance'].to_numpy()
+
+        vamp_scaled = (vamp_bias - means[0]) / stds[0]
+        ofi_scaled = (ofi - means[1]) / stds[1]
+        imb_scaled = (imbalance - means[2]) / stds[2]
+
+        raw_pred = (vamp_scaled * coef[0] + ofi_scaled * coef[1] + imb_scaled * coef[2] + intercept)
+
+        z_score = raw_pred / scale
+        mid = df['mid_price'].to_numpy()
+        spread = df['spread'].to_numpy()
+        
+        n = len(df)
 
         inventory = np.zeros(n)
-        current_inv = 0.0
         pnl = np.zeros(n)
+        current_inv = 0.0
+        # 总成本系数 = (手续费 + 滑点) / 10000
+        cost_ratio = (self.market_fee_bp + self.slippage_bp) / 10000
 
-        slippage = 3 / 10000
+        trades_side = np.zeros(n) # 1 for buy, -1 for sell
 
         for i in range(n - 1):
-            inv_ratio = current_inv / self.max_inventory
+            # A. 计算报价 (Base Spread + Inventory Skew)
+            # 仓位越多，越倾向于卖出：降低 Ask 吸引成交，降低 Bid 防止成交
+            inv_risk = current_inv / self.max_inventory
             
-            bid = mid[i] - spread / 2 - skew * inv_ratio
-            ask = mid[i] + spread / 2 - skew * inv_ratio
+            bid_price = mid[i] - spread[i] / 2 - self.market_fee_bp - (inv_risk * skew_factor * self.tick_size)
+            ask_price = mid[i] + spread[i] / 2 + self.market_fee_bp - (inv_risk * skew_factor * self.tick_size)
 
-            filled_buy = (next_mid[i] <= bid)
-            filled_sell = (next_mid[i] >= ask)
-            trade = False
-            trade_pnl = 0.0
-            if quote_buy[i] and filled_buy and current_inv < self.max_inventory:
+            can_buy = (z_score[i] > threshold) and (current_inv < self.max_inventory)
+            can_sell = (z_score[i] < -threshold) and (current_inv > -self.max_inventory)
+            filled_buy = False
+            filled_sell = False
+
+            if can_buy and mid[i+1] <= bid_price:
+                filled_buy = True
+
+            if can_sell and mid[i+1] >= ask_price:
+                filled_sell = True
+
+            trade_count = 0
+            step_realized_pnl = 0
+
+            if filled_buy:
                 current_inv += 1
-                trade_pnl -= spread / 2
-                trade = True
+                step_realized_pnl -= bid_price * (1 + cost_ratio)
+                trades_side[i] = 1
+                trade_count += 1
 
-            if quote_sell[i] and filled_sell and current_inv > -self.max_inventory:
+            if filled_sell:
                 current_inv -= 1
-                trade_pnl += spread / 2
-                trade = True
+                step_realized_pnl += ask_price * (1 - cost_ratio)
+                trades_side[i] = -1
+                trade_count += 1
 
+            # E. 计算盯市收益 (Mark-to-Market PnL)
+            inventory[i+1] = current_inv
+            # 总收益 = 已实现收益 + 仓位价值变动
             mtm = current_inv * (mid[i+1] - mid[i])
+            pnl[i+1] = step_realized_pnl + mtm
 
-            inventory[i] = current_inv
-            pnl[i] = trade_pnl + mtm - slippage * trade
-
-        df_bt =df_bt.with_columns([
-            pl.Series(name='inventory',values=inventory),
-            pl.Series(name='step_pnl',values=pnl)
+        df_bt = df.with_columns([
+            pl.Series("z_score", z_score),
+            pl.Series("inventory", inventory),
+            pl.Series("step_pnl", pnl),
+            pl.Series("trade_side", trades_side)
         ])
-
-        # print(f"--- maker backtest (Th: {threshold}, MaxInv: {self.max_inventory}, Gamma: {gamma}) ---")
-        # print(f"Total pnl: {df_bt['step_pnl'].sum():.4%}")
-        # print(f"Max inventory: {df_bt['inventory'].max()} | Min inventory: {df_bt['inventory'].min()}")
-        # print(f"Avg inventory: {df_bt['inventory'].abs().mean():.2f}")
         
         return df_bt
     
-    def find_best_maker_threshold(self, df: pl.DataFrame,weights:dict):
-        results = []
-        thresholds = np.arange(0.5, 2.5, 0.25)
-        for th in thresholds:
-            bt = self.backtest(df,weights,th)
-
-            pnl = bt['step_pnl'].sum()
-            trades = bt.filter(pl.col('step_pnl') != 0).height
-            avg_pnl = pnl / trades if trades > 0 else 0
-
-            results.append({
-                "threshold": th,
-                "total_pnl": pnl,
-                "trade_count": trades,
-                "avg_pnl_bp": avg_pnl * 10000
-            })
-
-        return results
 
 END
 

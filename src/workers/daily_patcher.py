@@ -102,7 +102,8 @@ class DailyPatcher:
                         try:
                             self.sync_to_clickhouse(gaps_df)
                             self.logger.info(f"✅ [PATCHED] Injected {len(gaps_df)} missing records into {exchange_id} {symbol}.")
-                            sql = f"OPTIMIZE TABLE market_data.traees_spot PARTITION '{self.date_str}' FINAL"
+                            partition_id = self.date_str.replace('-','')
+                            sql = f"OPTIMIZE TABLE market_data.trades_spot PARTITION {partition_id} FINAL"
                             self.ch_client.command(sql)
                             time.sleep(1)
                                 
@@ -267,6 +268,8 @@ class DailyPatcher:
                 return True
             else:
                 self.logger.error(f"🚨 [AUDIT-FAILED] Mismatch detected! Gaps found: {len(diff)}")
+                if os.path.exists(file_path):
+                    os.remove(file_path)
                 return False
 
         except Exception as e:

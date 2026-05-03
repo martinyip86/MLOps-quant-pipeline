@@ -4,6 +4,7 @@ from src.workers.feature_processor import FeatureProcessor
 import polars as pl
 import os
 import gc
+import time
 from datetime import datetime,timedelta,timezone
 
 
@@ -128,17 +129,23 @@ class Consolidator:
                 """
                 try:
                     self.logger.info(f"📊 Consolidating features: {exchange_id} {symbol} @ {current_date}")
-                    table_arrow = self.ch_client.query_arrow(sql)
+                    settings = {
+                        'max_memory_usage': 2000000000,          # 限制每個 query 用 2GB
+                        'max_bytes_before_external_group_by': 1000000000, # 唔夠 RAM 就寫入臨時 Disk
+                        'max_bytes_before_external_sort': 1000000000,     # 唔夠 RAM 就寫入臨時 Disk
+                    }
+                    table_arrow = self.ch_client.query_arrow(sql,settings=settings)
                     df = pl.from_arrow(table_arrow)
                     df.write_parquet(file_path)
                     del df
                     size_mb = os.path.getsize(file_path) / (1024 * 1024)
                     self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
+                    time.sleep(2)
                 except Exception as e:
                     self.logger.error(f"❌ Export failed: {e}")
                     raise
 
-        gc.collect() # Explicit garbage collection to manage large memory frames
+            gc.collect() # Explicit garbage collection to manage large memory frames
 
     def run(self):
         """Main execution flow for daily ETL."""
@@ -159,21 +166,31 @@ class Consolidator:
             for mkt_type in self.mkt_types:
                 for symbol in self.symbols:
                     for data_type in self.data_types:
-                        self.daily_feature_consolidation(
-                            symbol=symbol,
-                            exchange_id=exchange_id,
-                            mkt_type=mkt_type,
-                            data_type=data_type,
-                            current_date=current_date
+                        path = os.path.join(
+                            'data/processed',
+                            exchange_id,
+                            mkt_type,
+                            symbol.replace('/','-'),
+                            data_type,
+                            f"{current_date.replace('-','')}.parquet"
                         )
-                        feature_processor.process_daily_data(
-                            exchange_id=exchange_id,
-                            mkt_type=mkt_type,
-                            symbol=symbol,
-                            watch_type=data_type,
-                            date_str=current_date,
-                            logger=self.logger
-                        )
+                        if not os.path.exists(path):
+                            self.daily_feature_consolidation(
+                                symbol=symbol,
+                                exchange_id=exchange_id,
+                                mkt_type=mkt_type,
+                                data_type=data_type,
+                                current_date=current_date
+                            )
+                            feature_processor.process_daily_data(
+                                exchange_id=exchange_id,
+                                mkt_type=mkt_type,
+                                symbol=symbol,
+                                watch_type=data_type,
+                                date_str=current_date,
+                                logger=self.logger
+                            )
+                            gc.collect()
 
 def consolidator(target_date: str=None):
     """EntryPoint for Task Scheduler."""
