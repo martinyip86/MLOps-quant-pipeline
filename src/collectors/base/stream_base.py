@@ -26,15 +26,7 @@ class StreamBase(ABC):
     async def connect(self):
         pass
 
-    @abstractmethod
-    async def _handle_orderbook(self):
-        pass
-
-    @abstractmethod
-    async def _handle_trades(self):
-        pass
-
-    async def watch_loop(self,symbol,method_name):
+    async def watch_loop(self,symbol,method_name,watch_name):
         retry_delay = 1
         last_active = time.time()
         is_active = True
@@ -45,7 +37,7 @@ class StreamBase(ABC):
                     continue
 
                 method = getattr(self.ws,method_name)
-                data = await asyncio.wait_for(method(symbol),timeout=60)
+                data = await asyncio.wait_for(method(f"{symbol}:USDT" if self.mkt_type == 'future' else symbol),timeout=60)
 
                 self.last_time = time.time()
                 last_active = time.time()
@@ -62,7 +54,7 @@ class StreamBase(ABC):
                     self.logger.info(f"{symbol} {method_name} reconnect success")
 
                 await self.queue.put({
-                    'type':'orderbook' if 'book' in method_name else 'trades',
+                    'type':watch_name,
                     'symbol':symbol,
                     'data':data
                 })
@@ -109,10 +101,12 @@ class StreamBase(ABC):
                 msg = await self.queue.get()
                 
                 data_type = msg['type']
-                if data_type == 'orderbook':
+                if data_type == 'orderbook' and self.mkt_type == 'spot':
                     await self._handle_orderbook(msg['symbol'],msg['data'])
                 elif data_type == 'trades':
                     await self._handle_trades(msg['symbol'],msg['data'])
+                elif data_type == 'mark_price':
+                    await self._handle_market_price(msg['symbol'],msg['data'])
                     
                 self.queue.task_done()
             except Exception as e:

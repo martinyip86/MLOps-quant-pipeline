@@ -13,7 +13,6 @@ services:
       - ./src:/app/src
     environment:
       - EXCHANGE=binance
-      - TYPE=spot
       - PYTHONPATH=/app
     healthcheck:
       test: ["CMD", "curl","-f","http://localhost:8080/health"]

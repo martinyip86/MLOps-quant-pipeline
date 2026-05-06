@@ -30,3 +30,34 @@ class TradeData(BaseModel):
     amount:float = Field(...,description="Execution quantity")
     is_taker_buyer:bool = Field(...,description="Directional intent: True=Taker Buy (Bullish), False=Taker Sell (Bearish)")
     local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
+
+class TradeDataForFuture(BaseModel):
+    exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")
+    symbol:str = Field(...,description="Instrument symbol")
+    mkt_type:str = Field(...,description="Market segment (spot/swap/future)")
+    trade_id:int = Field(...,description="Unique execution ID from exchange by String Int")
+    timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
+    side:str = Field(...,description="Execution direction (buy/sell)")
+    price:float = Field(...,description="Execution price")
+    amount:float = Field(...,description="Execution quantity")
+    local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
+
+class MarketPriceData(BaseModel):
+    exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")
+    symbol:str = Field(...,description="Instrument symbol")
+    mkt_type:str = Field(...,description="Market segment (spot/swap/future)")
+    mark_price:float = Field(...,description="Execution Market Price")
+    index_price:float = Field(...,description="Execution Index Price")
+    funding_rate:float = Field(...,description="Funding Rate")
+    timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
+    next_funding_rate_timestamp:int = Field(...,description="Next funding rate timestamp (ms)")
+    local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
+
+class OpenInterestData(BaseModel):
+    exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")
+    symbol:str = Field(...,description="Instrument symbol")
+    mkt_type:str = Field(...,description="Market segment (spot/swap/future)")
+    base_volume:float = Field(...,description="Execution Base Volume")
+    open_interest_amount:float = Field(...,description="Execution Open Interest Amount")
+    timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
+    local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))

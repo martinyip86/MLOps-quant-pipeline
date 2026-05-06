@@ -3,7 +3,6 @@ from src.models.schema import TickData,TradeData
 import ccxt.pro as ccxt_pro
 import asyncio
 import time
-import orjson
 
 class BinanceSpotWsManager(StreamBase):
     def __init__(self, exchange_id, mkt_type):
@@ -12,7 +11,7 @@ class BinanceSpotWsManager(StreamBase):
     async def connect(self):
         async with self._reconnect_lock:
             if not self._is_reconnecting and self.ws:
-                    return
+                return
             try:
                 if self.ws:
                     self.logger.info(f"🔄 [CLOSE] Close old CCXT Pro client for {self.exchange_id}")
@@ -58,7 +57,7 @@ class BinanceSpotWsManager(StreamBase):
                     nonce=data['nonce'],
                     timestamp=ts
                 )
-                await pipe.xadd(stream_key,{'data':tick.model_dump_json()},maxlen=10000,approximate=True)
+                await pipe.xadd(stream_key,{'data':tick.model_dump_json()},maxlen=5000,approximate=True)
                 await pipe.execute()
         except Exception as e:
             self.logger.error(f"orderbook add redis error: {e}")
@@ -89,7 +88,7 @@ class BinanceSpotWsManager(StreamBase):
                         is_taker_buyer=is_taker_buyer
                     )
                     
-                    await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=10000,approximate=True)
+                    await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=5000,approximate=True)
                 await pipe.execute()
         except Exception as e:
             self.logger.error(f"trades add redis error: {e}")
