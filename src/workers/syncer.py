@@ -23,13 +23,13 @@ class Syncer:
 
     async def _get_redis_streaming_key(self):
         while True:
-            try:
-                for w_type in ['orderbook','trades','market_price','open_interest']:
-                    registry = f"registry:streams:{w_type}"
-                    remote_keys = await self.redis.smembers(registry)
-                    for remote_key in remote_keys:
-                        rekey = remote_key.decode() if isinstance(remote_key,bytes) else remote_key
-                        if rekey not in self.streaming_keys:
+            for w_type in ['orderbook','trades','market_price','open_interest','funding_rate']:
+                registry = f"registry:streams:{w_type}"
+                remote_keys = await self.redis.smembers(registry)
+                for remote_key in remote_keys:
+                    rekey = remote_key.decode() if isinstance(remote_key,bytes) else remote_key
+                    if rekey not in self.streaming_keys:
+                        try:
                             await self.redis.xgroup_create(
                                 name=rekey,
                                 groupname=self.group_name,
@@ -38,11 +38,15 @@ class Syncer:
                             )
                             self.logger.info(f"✅ Created group {self.group_name} for {remote_key}")
                             self.streaming_keys[rekey] = ">"
+                        except Exception as e:
+                            if "BUSYGROUP" in str(e):
+                                self.streaming_keys[rekey] = ">"
+                                self.logger.info(f"✅ Created group {self.group_name} for {remote_key}")
+                            else:
+                                self.logger.error(f"❌ [REGISTRY-ERROR] {e}")
+                                await asyncio.sleep(5)
 
-                await asyncio.sleep(30)
-            except Exception as e:
-                self.logger.error(f"❌ [REGISTRY-ERROR] {e}")
-                await asyncio.sleep(5)
+            await asyncio.sleep(30)
 
 
     async def storage_worker(self):

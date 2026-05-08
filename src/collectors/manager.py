@@ -1,6 +1,7 @@
 from src.collectors.binance.spot import BinanceSpotWsManager
 from src.collectors.binance.future import BinanceFutureManager
 from src.collectors.okx.spot import OkxSpotWsManager
+from src.collectors.okx.future import OkxFutureManager
 from src.monitoring.pusher import start_metrics_pusher
 import os
 import asyncio
@@ -14,7 +15,8 @@ class Manager:
         self._collector_map = {
             ('binance','spot'):BinanceSpotWsManager,
             ('okx','spot'):OkxSpotWsManager,
-            ('binance','future'):BinanceFutureManager
+            ('binance','future'):BinanceFutureManager,
+            ('okx','future'):OkxFutureManager,
         }
 
     async def main(self):
@@ -35,6 +37,8 @@ class Manager:
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_trades','trades')))
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_mark_price','mark_price')))
                     tasks.append(asyncio.create_task(controller.fetch_open_interest(symbol,30)))
+                    if self.exchange_id == 'okx':
+                        tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_funding_rate','funding_rate')))
 
             tasks.append(asyncio.create_task(controller.route()))
                    

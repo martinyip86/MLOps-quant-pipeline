@@ -4,7 +4,7 @@ import ccxt.pro as ccxt_pro
 import asyncio
 import time
 
-class BinanceFutureManager(StreamBase):
+class OkxFutureManager(StreamBase):
     def __init__(self, exchange_id, mkt_type):
         super().__init__(exchange_id, mkt_type)
 
@@ -17,15 +17,16 @@ class BinanceFutureManager(StreamBase):
                     self.logger.info(f"🔄 [CLOSE] Close old CCXT Pro client for {self.exchange_id}")
                     await self.ws.close()
                 self.logger.info(f"🔄 [RECONNECT] Initializing new CCXT Pro client for {self.exchange_id}...")
-                self.ws = ccxt_pro.binanceusdm({
+                self.ws = ccxt_pro.okx({
                     'enableRateLimit':True,
                     'options':{
-                        'defaultType':'swap',
+                        'defaultType':'future',
                         'ws': { 
                             "heartbeat": 20000 
                         }
                     }
                 })
+                await self.ws.load_markets()
                 await asyncio.sleep(0.01)
                 self.logger.info("✅ [SUCCESS] Connection established.")
             except Exception as e:
@@ -59,15 +60,11 @@ class BinanceFutureManager(StreamBase):
             self.logger.error(f"future trades add redis error: {e}")
 
     async def _handle_market_price(self,symbol:str,data):
-        stream_key_mp = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:market_price"
-        registry_mp = f"registry:streams:market_price"
-        await self.redis.sadd(registry_mp,stream_key_mp)
-        stream_key_fr = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:funding_rate"
-        registry_fr = f"registry:streams:funding_rate"
-        await self.redis.sadd(registry_fr,stream_key_fr)
+        stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:market_price"
+        registry = f"registry:streams:market_price"
+        await self.redis.sadd(registry,stream_key)
         try:
             async with self.redis.pipeline(transaction=False) as pipe:
-                info = data.get('info')
                 raw_ts = data.get('timestamp')
                 ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
                 marketPriceData = MarketPriceData(
@@ -76,33 +73,22 @@ class BinanceFutureManager(StreamBase):
                     mkt_type=self.mkt_type,
                     mark_price=data['markPrice'],
                     timestamp=ts,
-                    index_price=data['indexPrice']
+                    index_price=data['indexPrice'] if data['indexPrice'] is not None else 0.0,
+                    funding_rate=None,
+                    next_funding_rate_timestamp=None
                 )
-                fundingRateData = FundingRateData(
-                    exchange_id=self.exchange_id,
-                    symbol=symbol,
-                    mkt_type=self.mkt_type,
-                    timestamp=ts,
-                    funding_rate=info['r'],
-                    next_funding_rate_timestamp=info['T']
-                )
-                await pipe.xadd(stream_key_mp,{'data':marketPriceData.model_dump_json()},maxlen=5000,approximate=True)
-                await pipe.xadd(stream_key_fr,{'data':fundingRateData.model_dump_json()},maxlen=5000,approximate=True)
+                await pipe.xadd(stream_key,{'data':marketPriceData.model_dump_json()},maxlen=5000,approximate=True)
                 await pipe.execute()
         except Exception as e:
             self.logger.error(f"mp add redis error: {e}")
 
     async def fetch_open_interest(self,symbol:str,sleep_time:int=30):
         while True:
-            if self._is_reconnecting or not self.ws:
-                await asyncio.sleep(1)
-                continue
-            
+            data = await asyncio.wait_for(self.ws.fetch_open_interest(f'{symbol}:USDT'),timeout=60)
+            stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
+            registry = f"registry:streams:open_interest"
+            await self.redis.sadd(registry,stream_key)
             try:
-                data = await asyncio.wait_for(self.ws.fetch_open_interest(f'{symbol}:USDT'),timeout=60)
-                stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
-                registry = f"registry:streams:open_interest"
-                await self.redis.sadd(registry,stream_key)
                 async with self.redis.pipeline(transaction=False) as pipe:
                     raw_ts = data.get('timestamp')
                     ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
@@ -120,3 +106,25 @@ class BinanceFutureManager(StreamBase):
             except Exception as e:
                 self.logger.error(f"oi add redis error: {e}")
                 await asyncio.sleep(10)
+
+    async def _handle_funding_rate(self,symbol:str,data):
+        stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:funding_rate"
+        registry = f"registry:streams:funding_rate"
+        await self.redis.sadd(registry,stream_key)
+        try:
+            async with self.redis.pipeline(transaction=False) as pipe:
+                raw_ts = data.get('fundingTimestamp')
+                ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
+                fundingRateData = FundingRateData(
+                    exchange_id=self.exchange_id,
+                    symbol=symbol,
+                    mkt_type=self.mkt_type,
+                    timestamp=ts,
+                    funding_rate=data['fundingRate'],
+                    next_funding_rate_timestamp=data['nextFundingTimestamp']
+                )
+                await pipe.xadd(stream_key,{'data':fundingRateData.model_dump_json()},maxlen=5000,approximate=True)
+                await pipe.execute()
+            asyncio.sleep(60)
+        except Exception as e:
+            self.logger.error(f"mp add redis error: {e}")

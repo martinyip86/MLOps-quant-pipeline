@@ -48,9 +48,7 @@ class MarketPriceData(BaseModel):
     mkt_type:str = Field(...,description="Market segment (spot/swap/future)")
     mark_price:float = Field(...,description="Execution Market Price")
     index_price:float = Field(...,description="Execution Index Price")
-    funding_rate:float = Field(...,description="Funding Rate")
     timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
-    next_funding_rate_timestamp:int = Field(...,description="Next funding rate timestamp (ms)")
     local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
 
 class OpenInterestData(BaseModel):
@@ -59,5 +57,14 @@ class OpenInterestData(BaseModel):
     mkt_type:str = Field(...,description="Market segment (spot/swap/future)")
     base_volume:float = Field(...,description="Execution Base Volume")
     open_interest_amount:float = Field(...,description="Execution Open Interest Amount")
+    timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
+    local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
+
+class FundingRateData(BaseModel):
+    exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")
+    symbol:str = Field(...,description="Instrument symbol")
+    mkt_type:str = Field(...,description="Market segment (spot/swap/future)")
+    funding_rate:float = Field(...,description="Funding Rate")
+    next_funding_rate_timestamp:int = Field(...,description="Next funding rate timestamp (ms)")
     timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
     local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
