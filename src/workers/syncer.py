@@ -18,8 +18,8 @@ class Syncer:
             log_file="logs/workers/worker_syncer.log"
         )
         self.group_name = "ch_syncer_group"
-        self.batch_size = 10000
-        self.flush_interval = 10.0
+        self.batch_size = 2000
+        self.flush_interval = 3.0
 
     async def _get_redis_streaming_key(self):
         while True:
@@ -45,9 +45,7 @@ class Syncer:
                             else:
                                 self.logger.error(f"❌ [REGISTRY-ERROR] {e}")
                                 await asyncio.sleep(5)
-
             await asyncio.sleep(30)
-
 
     async def storage_worker(self):
         buffer = []
@@ -67,7 +65,7 @@ class Syncer:
             )
             if response:
                 for stream_name,messages in response:
-                    print(f"📡 处理来自 {stream_name} 的 {len(messages)} 条消息")
+                    # print(f"📡 处理来自 {stream_name} 的 {len(messages)} 条消息")
                     s_key = stream_name.decode() if isinstance(stream_name, bytes) else stream_name
                     if stream_name not in pending_ack:
                         pending_ack[s_key] = []
@@ -79,12 +77,19 @@ class Syncer:
             if len(buffer) > self.batch_size or (time.time() - last_flush > self.flush_interval and buffer):
                 success = await self._flush(buffer)
                 if success:
-                    acks = [
-                        self.redis.xack(stream_name,self.group_name,*msg_ids)
-                        for stream_name,msg_ids in pending_ack.items() if msg_ids
-                    ]
-                    if acks:
-                        await asyncio.gather(*acks)
+                    # acks = [
+                    #     self.redis.xack(stream_name,self.group_name,*msg_ids)
+                    #     for stream_name,msg_ids in pending_ack.items() if msg_ids
+                    # ]
+                    # if acks:
+                    #     await asyncio.gather(*acks)
+
+                    async with self.redis.pipeline(transaction=False) as pipe:
+                        for stream_name,msg_ids in pending_ack.items():
+                            if msg_ids:
+                                pipe.xack(stream_name,self.group_name,*msg_ids)
+
+                        await pipe.execute()   
 
                     # 重置计数器和缓存
                     self.logger.info(f"✅ [ACK] Confirmed {len(buffer)} messages across {len(pending_ack)} streams.")
@@ -109,13 +114,20 @@ class Syncer:
 
             buckets[target_table].append(content)
         try:
-            tasks = [
-                self._insert_db(target_table,data)
-                for target_table,data in buckets.items() if data
-            ]
-            await asyncio.gather(*tasks)
+            # tasks = [
+            #     self._insert_db(target_table,data)
+            #     for target_table,data in buckets.items() if data
+            # ]
+            # await asyncio.gather(*tasks)
+            for target_table, table_data in buckets.items():
+                if table_data:
+                    await self._insert_db(target_table, table_data)
+                    # 每写完一张表，微小休眠，给服务器 RSS 释放的时间
+                    await asyncio.sleep(0.1)
+
             return True
         except Exception as e:
+            self.logger.error(f"Flush failed: {e}")
             return False
             
     async def _insert_db(self,table,data):
@@ -131,7 +143,7 @@ class Syncer:
                 arrow_table = df.to_arrow()
                 self.ch.insert_arrow(table=table,arrow_table=arrow_table)
                 duration = time.time()-start_time
-                self.logger.info(f"🚢 [FLUSH] Table: {table} | Rows: {len(df)} | Latency: {duration:.3f}s")
+                self.logger.info(f"🚢 [FLUSH] Table: {table} | Rows: {len(df)} | binance: {len(df.filter(pl.col('exchange_id')=='binance'))} | okx: {len(df.filter(pl.col('exchange_id')=='okx'))} | Latency: {duration:.3f}s")
 
                 if duration > self.flush_interval * 0.8:
                     self.logger.warning(f"⚠️ [PRESSURE] DB write latency is nearing limit for {table}!")

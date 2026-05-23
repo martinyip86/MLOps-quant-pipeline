@@ -11,7 +11,7 @@ class Manager:
     def __init__(self,exchange_id:str):
         self.exchange_id:str = exchange_id
         self.mkt_types = ['spot','future']
-        self.symbols = ['BTC/USDT','ETH/USDT']
+        self.symbols = ['BTC/USDT','ETH/USDT','ETH/BTC']
         self._collector_map = {
             ('binance','spot'):BinanceSpotWsManager,
             ('okx','spot'):OkxSpotWsManager,

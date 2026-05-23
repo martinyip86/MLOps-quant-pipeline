@@ -21,6 +21,12 @@ class StreamBase(ABC):
         self._is_reconnecting = False
         self._reconnect_lock = asyncio.Lock()
         self.ws = None
+        self.timeout_settings = {
+            'watch_order_book':60,
+            'watch_trades':60,
+            'watch_mark_price':120,
+            'watch_funding_rate':600,
+        }
 
     @abstractmethod
     async def connect(self):
@@ -29,7 +35,15 @@ class StreamBase(ABC):
     async def watch_loop(self,symbol,method_name,watch_name):
         retry_delay = 1
         last_active = time.time()
+        time_out_set = self.timeout_settings[method_name]
         is_active = True
+        
+        if self.mkt_type == 'future':
+            split_symbol = symbol.split('/')
+            watch_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
+        else:
+            watch_symbol = symbol
+
         while True:
             try:
                 if self._is_reconnecting or not self.ws:
@@ -37,7 +51,7 @@ class StreamBase(ABC):
                     continue
 
                 method = getattr(self.ws,method_name)
-                data = await asyncio.wait_for(method(f"{symbol}:USDT" if self.mkt_type == 'future' else symbol),timeout=60)
+                data = await asyncio.wait_for(method(watch_symbol),timeout=time_out_set)
 
                 self.last_time = time.time()
                 last_active = time.time()
@@ -62,8 +76,11 @@ class StreamBase(ABC):
                 is_active = False
                 silence_gap = time.time() - last_active
 
-                if self._is_reconnecting and silence_gap < 5:
+                max_silence = time_out_set * 2
+
+                if self._is_reconnecting and silence_gap < max_silence:
                     self.logger.debug(f"ℹ️ {symbol} {method_name} suppressed during global reconnect.")
+                    continue
                 else:
                     silence_gauge.labels(
                         exchange=self.exchange_id,
@@ -78,7 +95,7 @@ class StreamBase(ABC):
                     is_timeout = isinstance(e, asyncio.TimeoutError)
                     is_network_error = any(msg in str(e).lower() for msg in ['closed', 'reset', 'disconnected', 'none type'])
 
-                    if silence_gap > 61 or is_network_error or is_timeout:
+                    if silence_gap > max_silence or is_network_error or is_timeout:
                         if not self._is_reconnecting:
                             self._is_reconnecting = True
                             self.logger.warning(f"🚨 [FATAL] {symbol} {method_name} dead. Triggering global reconnect...")
@@ -102,16 +119,17 @@ class StreamBase(ABC):
                 
                 data_type = msg['type']
                 if data_type == 'orderbook' and self.mkt_type == 'spot':
-                    await self._handle_orderbook(msg['symbol'],msg['data'])
+                    asyncio.create_task(self._handle_orderbook(msg['symbol'],msg['data']))
                 elif data_type == 'trades':
-                    await self._handle_trades(msg['symbol'],msg['data'])
+                    asyncio.create_task(self._handle_trades(msg['symbol'],msg['data']))
                 elif data_type == 'mark_price':
-                    await self._handle_market_price(msg['symbol'],msg['data'])
-                    
+                    asyncio.create_task(self._handle_market_price(msg['symbol'],msg['data']))
+                elif data_type == 'funding_rate':
+                    asyncio.create_task(self._handle_funding_rate(msg['symbol'],msg['data']))
+
                 self.queue.task_done()
             except Exception as e:
                 self.logger.error(f"route have error: {e}")
-                ws_error_total.labels(exchange=self.exchange_id,mkt_type=self.mkt_type,symbol=msg['symbol']).inc()
                 await asyncio.sleep(0.1)
 
     async def start_health_check(self,port=8080):

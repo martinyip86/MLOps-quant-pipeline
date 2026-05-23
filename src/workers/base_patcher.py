@@ -54,7 +54,7 @@ class BasePatcher:
 
         for i in range(0,total_row,chunk_size):
             chunk = df.slice(i,chunk_size)
-            self.logger.info(f"🚀 [SYNC][{self.exchange_id}][{self.symbol}] Pushing chunk {i//chunk_size + 1} ({len(chunk)} rows)")
+            self.logger.info(f"🚀 [SYNC][{self.exchange_id}][{self.symbol}][{table}] Pushing chunk {i//chunk_size + 1} ({len(chunk)} rows)")
             try:
                 self.ch.insert_arrow(
                     table=table,
@@ -65,7 +65,7 @@ class BasePatcher:
                         'max_insert_block_size': chunk_size
                     }
                 )
-                time.sleep(5)
+                time.sleep(1)
             except Exception as e:
                 self.logger.error(f"🚨 [DB-ERROR] Insertion failed: {e}")
                 raise

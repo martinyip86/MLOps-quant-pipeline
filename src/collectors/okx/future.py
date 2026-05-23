@@ -1,5 +1,5 @@
 from src.collectors.base.stream_base import StreamBase
-from src.models.schema import TradeDataForFuture,MarketPriceData,OpenInterestData,FundingRateData
+from src.models.schema import TradeDataForFuture,MarketPriceData,OpenInterestData,FundingRateData,OrderbookForFuture
 import ccxt.pro as ccxt_pro
 import asyncio
 import time
@@ -34,6 +34,30 @@ class OkxFutureManager(StreamBase):
                 raise e
             finally:
                 self._is_reconnecting = False
+
+    async def _handle_orderbook(self,symbol:str,data):
+        stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:orderbook"
+        registry = f"registry:streams:orderbook"
+        raw_ts = data.get('timestamp')
+        ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
+        await self.redis.sadd(registry,stream_key)
+        try:
+            async with self.redis.pipeline(transaction=False) as pipe:
+                tick = OrderbookForFuture(
+                    exchange_id=self.exchange_id,
+                    symbol=symbol,
+                    mkt_type=self.mkt_type,
+                    bid_prices=[row[0] for row in data['bids'][:20]],
+                    bid_volumes=[row[1] for row in data['bids'][:20]],
+                    ask_prices=[row[0] for row in data['asks'][:20]],
+                    ask_volumes=[row[1] for row in data['asks'][:20]],
+                    nonce=data['nonce'],
+                    timestamp=ts
+                )
+                await pipe.xadd(stream_key,{'data':tick.model_dump_json()},maxlen=5000,approximate=True)
+                await pipe.execute()
+        except Exception as e:
+            self.logger.error(f"orderbook add redis error: {e}")
 
     async def _handle_trades(self,symbol:str,trades):
         stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:trades"
@@ -83,12 +107,18 @@ class OkxFutureManager(StreamBase):
             self.logger.error(f"mp add redis error: {e}")
 
     async def fetch_open_interest(self,symbol:str,sleep_time:int=30):
+        split_symbol = symbol.split('/')
+        future_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
         while True:
-            data = await asyncio.wait_for(self.ws.fetch_open_interest(f'{symbol}:USDT'),timeout=60)
-            stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
-            registry = f"registry:streams:open_interest"
-            await self.redis.sadd(registry,stream_key)
             try:
+                if self._is_reconnecting or not self.ws:
+                    await asyncio.sleep(1)
+                    continue
+                
+                data = await asyncio.wait_for(self.ws.fetch_open_interest(future_symbol),timeout=120)
+                stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
+                registry = f"registry:streams:open_interest"
+                await self.redis.sadd(registry,stream_key)
                 async with self.redis.pipeline(transaction=False) as pipe:
                     raw_ts = data.get('timestamp')
                     ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
@@ -125,6 +155,5 @@ class OkxFutureManager(StreamBase):
                 )
                 await pipe.xadd(stream_key,{'data':fundingRateData.model_dump_json()},maxlen=5000,approximate=True)
                 await pipe.execute()
-            asyncio.sleep(60)
         except Exception as e:
             self.logger.error(f"mp add redis error: {e}")

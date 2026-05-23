@@ -33,21 +33,8 @@ class Consolidator:
         file_path = self._generate_filepath(exchange_id,symbol,'spot','orderbook',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
-            start_ts = int(date_obj.timestamp() * 1000)
-            end_ts = start_ts + 24 * 60 * 60 * 1000 -1
-            sql = f"""
-                SELECT 
-                    bid_prices,
-                    bid_volumes,
-                    ask_prices,
-                    ask_volumes,
-                    timestamp
-                FROM market_data.orderbook_spot
-                WHERE exchange_id='{exchange_id}'
-                    AND symbol='{symbol}'
-                    AND timestamp >= {start_ts}
-                    AND timestamp <= {end_ts}
-            """
+            interval_ms = 6 * 60 * 60 * 1000
+
             settings = {
                 'max_threads': 1,               # 必须为1，严禁并发
                 'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
@@ -62,11 +49,31 @@ class Consolidator:
                 'timestamp'
             ]
             chunks = []
-            with self.ch.query_column_block_stream(sql,settings=settings) as stream:
-                for block in stream:
-                    if not block: continue
-                    chunk_df = pl.from_dict(dict(zip(column_names,block)))
-                    chunks.append(chunk_df)
+
+            for i in range(4):
+                start_ts = int(date_obj.timestamp() * 1000 + i * interval_ms)
+                end_ts = start_ts + interval_ms -1
+                sql = f"""
+                    SELECT 
+                        bid_prices,
+                        bid_volumes,
+                        ask_prices,
+                        ask_volumes,
+                        timestamp
+                    FROM market_data.orderbook_spot
+                    WHERE exchange_id='{exchange_id}'
+                        AND symbol='{symbol}'
+                        AND timestamp >= {start_ts}
+                        AND timestamp <= {end_ts}
+                """
+                
+                with self.ch.query_column_block_stream(sql,settings=settings) as stream:
+                    for block in stream:
+                        if not block: continue
+                        chunk_df = pl.from_dict(dict(zip(column_names,block)))
+                        chunks.append(chunk_df)
+
+                gc.collect()
 
             if chunks:
                 df:pl.DataFrame = pl.concat(chunks,rechunk=True)
@@ -324,18 +331,18 @@ class Consolidator:
         for exchange_id in self.exchange_ids:
             if target_date is None or target_date >= datetime.now(timezone.utc).strftime('%Y-%m-%d'):
                 if exchange_id == 'binance':
-                    target_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
+                    current_target_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
                 elif exchange_id == 'okx':
-                    target_date= (datetime.now(timezone.utc) - timedelta(days=2)).strftime('%Y-%m-%d')
+                    current_target_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime('%Y-%m-%d')
             else:
-                target_date = target_date
+                current_target_date = target_date
             for symbol in self.symbols:
-                self._export_orderbook_spot(exchange_id,symbol,target_date)
-                self._export_trades_spot(exchange_id,symbol,target_date)
-                self._export_trades_future(exchange_id,symbol,target_date)
-                self._export_mark_price_future(exchange_id,symbol,target_date)
-                self._export_open_interest_future(exchange_id,symbol,target_date)
-                self._export_funding_rate_future(exchange_id,symbol,target_date)
+                self._export_orderbook_spot(exchange_id,symbol,current_target_date)
+                self._export_trades_spot(exchange_id,symbol,current_target_date)
+                self._export_trades_future(exchange_id,symbol,current_target_date)
+                self._export_mark_price_future(exchange_id,symbol,current_target_date)
+                self._export_open_interest_future(exchange_id,symbol,current_target_date)
+                self._export_funding_rate_future(exchange_id,symbol,current_target_date)
 
         self.logger.info("generate completed.")
 
