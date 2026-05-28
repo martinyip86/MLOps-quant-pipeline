@@ -62,7 +62,7 @@ class TradesFuturetPatcher(BasePatcher):
         target_col = columns[exchange_id]
         clear_columns = target_col['clear_columns']
         schema = target_col['select']
-        return pl.scan_csv(file_path).with_columns(clear_columns).select(schema)
+        return pl.scan_csv(file_path).with_columns(clear_columns).select(schema).filter((pl.col('price') > 0) & (pl.col('amount') > 0))
     
     def _get_ch_data(self,exchange_id:str,symbol:str,max_trade_id,min_trade_id) -> pl.LazyFrame:
         sql = f"""

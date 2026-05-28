@@ -10,8 +10,8 @@ from datetime import datetime,timedelta,timezone
 class Consolidator:
     def __init__(self):
         self.logger = setup_logger("workers.consolidator")
-        self.exchange_ids = ['binance','okx']
-        self.symbols = ['BTC/USDT','ETH/USDT']
+        self.exchange_ids = ['binance']
+        self.symbols = ['BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT']
         self.ch = ch_manager.connect('hk')
         self.processed_path = "data/processed"
 
@@ -33,6 +33,7 @@ class Consolidator:
         file_path = self._generate_filepath(exchange_id,symbol,'spot','orderbook',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
             interval_ms = 6 * 60 * 60 * 1000
 
             settings = {
@@ -96,10 +97,79 @@ class Consolidator:
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
                 self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
 
+    def _export_orderbook_future(self,exchange_id:str,symbol:str,target_date:str):
+        file_path = self._generate_filepath(exchange_id,symbol,'future','orderbook',target_date)
+        if not os.path.exists(file_path):
+            date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
+            interval_ms = 6 * 60 * 60 * 1000
+
+            settings = {
+                'max_threads': 1,               # 必须为1，严禁并发
+                'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
+                'max_memory_usage': '1G',       # 限制服务器使用的总内存
+                'preferred_block_size_bytes': '1048576',
+            }
+            column_names = [
+                'bid_prices', 
+                'bid_volumes', 
+                'ask_prices', 
+                'ask_volumes', 
+                'timestamp'
+            ]
+            chunks = []
+
+            for i in range(4):
+                start_ts = int(date_obj.timestamp() * 1000 + i * interval_ms)
+                end_ts = start_ts + interval_ms -1
+                sql = f"""
+                    SELECT 
+                        bid_prices,
+                        bid_volumes,
+                        ask_prices,
+                        ask_volumes,
+                        timestamp
+                    FROM market_data.orderbook_future
+                    WHERE exchange_id='{exchange_id}'
+                        AND symbol='{symbol}'
+                        AND timestamp >= {start_ts}
+                        AND timestamp <= {end_ts}
+                """
+                
+                with self.ch.query_column_block_stream(sql,settings=settings) as stream:
+                    for block in stream:
+                        if not block: continue
+                        chunk_df = pl.from_dict(dict(zip(column_names,block)))
+                        chunks.append(chunk_df)
+
+                gc.collect()
+
+            if chunks:
+                df:pl.DataFrame = pl.concat(chunks,rechunk=True)
+                del chunks
+                df = df.with_columns([
+                    pl.lit(exchange_id).alias('exchange_id'),
+                    pl.lit(symbol).alias('symbol'),
+                    pl.lit('future').alias('mkt_type'),
+                    ((pl.col('bid_prices').list.get(0) * pl.col('ask_volumes').list.get(0) + pl.col('ask_prices').list.get(0) * pl.col('bid_volumes').list.get(0)) / (pl.col('bid_volumes').list.get(0) + pl.col('ask_volumes').list.get(0) + 1e-8)).alias('micro_price'),
+                    (pl.col('ask_prices').list.get(0) - pl.col('bid_prices').list.get(0)).alias('spread'),
+                    ((pl.col('bid_prices').list.get(0) + pl.col('ask_prices').list.get(0)) / 2).alias('mid_price'),
+                    ((pl.col('ask_prices').list.slice(0,20) * pl.col('ask_volumes').list.slice(0,20)).list.sum() / (pl.col('ask_volumes').list.slice(0,20).list.sum() + 1e-8)).alias('sim_buy_price_avg')
+                ]).with_columns([
+                    ((pl.col('sim_buy_price_avg') / pl.col('mid_price') - 1) * 10000).alias('buy_impact_bps')
+                ]).sort('timestamp')
+                tmp_path = f"{file_path}.tmp"
+                df.write_parquet(tmp_path)
+                os.replace(tmp_path,file_path)
+                del df
+                size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
+
     def _export_trades_spot(self,exchange_id:str,symbol:str,target_date:str):
         file_path = self._generate_filepath(exchange_id,symbol,'spot','trades',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
             start_ts = int(date_obj.timestamp() * 1000)
             end_ts = start_ts + 24 * 60 * 60 * 1000 -1
             sql = f"""
@@ -113,6 +183,8 @@ class Consolidator:
                 FROM market_data.trades_spot
                 WHERE exchange_id='{exchange_id}'
                     AND symbol='{symbol}'
+                    AND price > 0
+                    AND amount > 0
                     AND timestamp >= {start_ts}
                     AND timestamp <= {end_ts}
             """
@@ -148,6 +220,7 @@ class Consolidator:
         file_path = self._generate_filepath(exchange_id,symbol,'future','trades',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
             start_ts = int(date_obj.timestamp() * 1000)
             end_ts = start_ts + 24 * 60 * 60 * 1000 -1
             sql = f"""
@@ -160,9 +233,12 @@ class Consolidator:
                 FROM market_data.trades_future
                 WHERE exchange_id='{exchange_id}'
                     AND symbol='{symbol}'
+                    AND price > 0
+                    AND amount > 0
                     AND timestamp >= {start_ts}
                     AND timestamp <= {end_ts}
             """
+
             settings = {
                 'max_threads': 1,               # 必须为1，严禁并发
                 'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
@@ -195,6 +271,7 @@ class Consolidator:
         file_path = self._generate_filepath(exchange_id,symbol,'future','mark_price',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
             start_ts = int(date_obj.timestamp() * 1000)
             end_ts = start_ts + 24 * 60 * 60 * 1000 -1
             sql = f"""
@@ -240,6 +317,7 @@ class Consolidator:
         file_path = self._generate_filepath(exchange_id,symbol,'future','open_interest',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
             start_ts = int(date_obj.timestamp() * 1000)
             end_ts = start_ts + 24 * 60 * 60 * 1000 -1
             sql = f"""
@@ -285,6 +363,7 @@ class Consolidator:
         file_path = self._generate_filepath(exchange_id,symbol,'future','funding_rate',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
             start_ts = int(date_obj.timestamp() * 1000)
             end_ts = start_ts + 24 * 60 * 60 * 1000 -1
             sql = f"""
@@ -336,8 +415,11 @@ class Consolidator:
                     current_target_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime('%Y-%m-%d')
             else:
                 current_target_date = target_date
+
+            print(current_target_date)
             for symbol in self.symbols:
                 self._export_orderbook_spot(exchange_id,symbol,current_target_date)
+                self._export_orderbook_future(exchange_id,symbol,current_target_date)
                 self._export_trades_spot(exchange_id,symbol,current_target_date)
                 self._export_trades_future(exchange_id,symbol,current_target_date)
                 self._export_mark_price_future(exchange_id,symbol,current_target_date)

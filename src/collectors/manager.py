@@ -11,7 +11,7 @@ class Manager:
     def __init__(self,exchange_id:str):
         self.exchange_id:str = exchange_id
         self.mkt_types = ['spot','future']
-        self.symbols = ['BTC/USDT','ETH/USDT','ETH/BTC']
+        self.symbols = ['BTC/USDT','ETH/USDT','ETH/BTC','SOL/USDT','XRP/USDT']
         self._collector_map = {
             ('binance','spot'):BinanceSpotWsManager,
             ('okx','spot'):OkxSpotWsManager,
@@ -34,9 +34,11 @@ class Manager:
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_order_book','orderbook')))
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_trades','trades')))
                 if mkt_type == 'future':
+                    tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_order_book','orderbook')))
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_trades','trades')))
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_mark_price','mark_price')))
                     tasks.append(asyncio.create_task(controller.fetch_open_interest(symbol,30)))
+                    tasks.append(asyncio.create_task(controller.watch_liquidations(symbol)))
                     if self.exchange_id == 'okx':
                         tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_funding_rate','funding_rate')))
 

@@ -10,7 +10,8 @@ class TrainTakerAS:
         self.kappa = kappa
         self.sigma_window = sigma_window
         self.fee_maker = 0.0002
-        self.fee_taker = 0.0005
+        self.fee_taker_future = 0.0003
+        self.fee_taker_spot = 0.0005
 
         self.logger = setup_logger(
             name='taker_backtest_v1',
@@ -73,7 +74,9 @@ class TrainTakerAS:
             spread_zscore = row['spread_zscore']
             mom_bps_1s = row['mom_bps_1s']
             future_spot_basis = row['future_spot_basis']
+            basis_ma = row['basis_ma']
             ofi_1s = row['ofi_1s']
+            buy_impact = row['buy_impact_bps']
 
             w_obi = row['obi_l5'] * 0.5 + row['obi_l10'] * 0.3 + row['obi_l20'] * 0.2
 
@@ -155,14 +158,15 @@ class TrainTakerAS:
             else:
                 # ------ 🚨 寻找高爆发机会开仓 ------
                 if self.cooldown_timer > 0:
-                    current_pnl = self.cash
-                    self.pnl.append(current_pnl)
                     continue
 
                 is_trending = row.get('is_trending_regime', True)
 
                 if is_trending:
-                    if alpha_signal > entry_threshold and w_obi > -0.5 and ofi_1s > 0 and microprice_dev > 0:
+                    qty = 0.1
+                    # 计算预估的双边开仓硬成本 (USDT)
+                    estimated_open_fee = (row['ask_prices'][0] * self.fee_taker_spot + row['bid_prices'][0] * self.fee_taker_future) * qty
+                    if alpha_signal > entry_threshold and future_spot_basis > basis_ma + 15.0 and (future_spot_basis - basis_ma) * qty > (estimated_open_fee + buy_impact * 0.1):
                         # 趋势看涨，高频主动吃卖一价开多
                         self.execute_taker_buy(price=row['ask_prices'][0])
                         self.entry_price = row['ask_prices'][0]

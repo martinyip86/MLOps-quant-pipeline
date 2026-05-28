@@ -118,7 +118,7 @@ class StreamBase(ABC):
                 msg = await self.queue.get()
                 
                 data_type = msg['type']
-                if data_type == 'orderbook' and self.mkt_type == 'spot':
+                if data_type == 'orderbook':
                     asyncio.create_task(self._handle_orderbook(msg['symbol'],msg['data']))
                 elif data_type == 'trades':
                     asyncio.create_task(self._handle_trades(msg['symbol'],msg['data']))

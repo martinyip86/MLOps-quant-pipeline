@@ -23,7 +23,7 @@ class Syncer:
 
     async def _get_redis_streaming_key(self):
         while True:
-            for w_type in ['orderbook','trades','market_price','open_interest','funding_rate']:
+            for w_type in ['orderbook','trades','market_price','open_interest','funding_rate','liquidations']:
                 registry = f"registry:streams:{w_type}"
                 remote_keys = await self.redis.smembers(registry)
                 for remote_key in remote_keys:

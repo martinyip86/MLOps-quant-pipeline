@@ -7,8 +7,8 @@ import time
 class DailyPatcher:
     def __init__(self,target_date:str=None):
         self.target_date = target_date
-        self.exchange_ids = ['binance','okx']
-        self.symbols = ['BTC/USDT','ETH/USDT']
+        self.exchange_ids = ['binance']
+        self.symbols = ['BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT']
         self.logger = setup_logger(
             name='daily.patcher',
             log_file='logs/workers/daily_patcher.log'

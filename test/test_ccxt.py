@@ -3,7 +3,7 @@ import asyncio
 import polars as pl
 
 async def main():
-    symbol = 'ETH/BTC:BTC'
+    symbol = 'ETH/USDT:USDT'
     exchange = ccxt_pro.binanceusdm({
         'enableRateLimit':True,
         'options':{
@@ -12,8 +12,11 @@ async def main():
     })
     # await exchange.load_markets()
 
-    orderbook = await exchange.watch_order_book(symbol)
-    print(orderbook.keys())
+    data = await exchange.watch_liquidations(symbol)
+    print(data)
+
+    # orderbook = await exchange.watch_order_book(symbol)
+    # print(orderbook.keys())
 
     # mark_price = await exchange.watch_mark_price(symbol)
     # print("mark_price")

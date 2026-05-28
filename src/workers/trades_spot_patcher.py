@@ -69,7 +69,7 @@ class TradesSpotPatcher(BasePatcher):
         clear_columns = target_col['clear_columns']
         schema = target_col['select']
         lz = pl.scan_csv(file_path,has_header=False,new_columns=header) if exchange_id == 'binance' else pl.scan_csv(file_path)
-        return lz.with_columns(clear_columns).select(schema)
+        return lz.with_columns(clear_columns).select(schema).filter((pl.col('price') > 0) & (pl.col('amount') > 0))
     
     def _get_ch_data(self,exchange_id:str,symbol:str,max_trade_id,min_trade_id) -> pl.LazyFrame:
         sql = f"""

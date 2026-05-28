@@ -1,5 +1,5 @@
 from src.collectors.base.stream_base import StreamBase
-from src.models.schema import TradeDataForFuture,MarketPriceData,OpenInterestData,FundingRateData,OrderbookForFuture
+from src.models.schema import TradeDataForFuture,MarketPriceData,OpenInterestData,FundingRateData,OrderbookForFuture,LiquidationsData
 import ccxt.pro as ccxt_pro
 import asyncio
 import time
@@ -119,12 +119,12 @@ class BinanceFutureManager(StreamBase):
     async def fetch_open_interest(self,symbol:str,sleep_time:int=30):
         split_symbol = symbol.split('/')
         future_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
+        stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
+        registry = f"registry:streams:open_interest"
+        await self.redis.sadd(registry,stream_key)
         while True:
-            data = await asyncio.wait_for(self.ws.fetch_open_interest(future_symbol),timeout=60)
-            stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
-            registry = f"registry:streams:open_interest"
-            await self.redis.sadd(registry,stream_key)
             try:
+                data = await asyncio.wait_for(self.ws.fetch_open_interest(future_symbol),timeout=60)
                 async with self.redis.pipeline(transaction=False) as pipe:
                     raw_ts = data.get('timestamp')
                     ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
@@ -141,4 +141,37 @@ class BinanceFutureManager(StreamBase):
                 await asyncio.sleep(sleep_time)
             except Exception as e:
                 self.logger.error(f"oi add redis error: {e}")
+                await asyncio.sleep(10)
+
+    async def watch_liquidations(self,symbol:str):
+        split_symbol = symbol.split('/')
+        future_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
+        stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:liquidations"
+        registry = f"registry:streams:liquidations"
+        await self.redis.sadd(registry,stream_key)
+        while True:
+            try:
+                data = await self.ws.watch_liquidations(future_symbol)
+                
+                async with self.redis.pipeline(transaction=False) as pipe:
+                    for item in data:
+                        info = item['info']
+                        lq_data = LiquidationsData(
+                            exchange_id=self.exchange_id,
+                            symbol=symbol,
+                            price=info['p'],
+                            amount=info['q'],
+                            side=info['S'],
+                            time_in_force=info['f'],
+                            order_status=info['X'],
+                            timestamp=info['T']
+                        )
+                        await pipe.xadd(stream_key,{'data':lq_data.model_dump_json()},maxlen=5000,approximate=True)
+                    
+                    await pipe.execute()
+
+            except Exception as e:
+                self.logger.error(f"liquidations add redis error: {e}")
+                if data is not None:
+                    print(data)
                 await asyncio.sleep(10)

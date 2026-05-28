@@ -80,3 +80,14 @@ class FundingRateData(BaseModel):
     next_funding_rate_timestamp:int = Field(...,description="Next funding rate timestamp (ms)")
     timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
     local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
+
+class LiquidationsData(BaseModel):
+    exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")
+    symbol:str = Field(...,description="Instrument symbol")
+    price:float = Field(...,description="liquidations")
+    amount:float = Field(...,description="Execution quantity")
+    side:str = Field(...,description="Execution direction (buy/sell)")
+    time_in_force:str = Field(...,description="逐笔有效时效")
+    order_status:str = Field(...,description="订单状态")
+    timestamp:int = Field(...,description="Matching engine execution timestamp (ms)")
+    local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
