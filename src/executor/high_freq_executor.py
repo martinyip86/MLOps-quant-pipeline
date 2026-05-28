@@ -135,7 +135,12 @@ class HighFreqTakerStrategyExecutor:
                         df_mark_price=df_mark_price_future,
                         df_open_interest=df_open_interest_future
                     )
-                    self.strategies[symbol].run(df=df.collect().tail(1))
+                    row = df.collect().tail(1).row(0,named=True)
+
+                    signals = []
+                    for strategy in self.strategies[symbol]:
+                        signal = strategy.on_features()
+
 
                 except Exception as e:
                     self.logger.error(f"❌ [{symbol}] Polars pipeline 运行报错: {e}", exc_info=True)
