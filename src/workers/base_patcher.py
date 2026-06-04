@@ -49,7 +49,7 @@ class BasePatcher:
             return False
         
     def sync_to_clickhouse(self,df:pl.DataFrame,table:str):
-        chunk_size = 100000
+        chunk_size = 50000
         total_row  = len(df)
 
         for i in range(0,total_row,chunk_size):

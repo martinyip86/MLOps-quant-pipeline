@@ -41,6 +41,7 @@ class PortFolioAllocator:
                     symbol=symbol,
                     target_qty=target_qty,
                     reason=" | ".join(reasons),
+                    timestamp=max(s.timestamp for s in symbol_signals),
                 )
             )
 

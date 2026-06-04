@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 class SignalSide(str,Enum):
     LONG = "LONG"
@@ -23,6 +22,7 @@ class TargetPosition:
     symbol:str
     target_qty:float
     reason:str
+    timestamp:int
 
 @dataclass
 class OrderIntent:
@@ -31,4 +31,13 @@ class OrderIntent:
     qty:float
     order_type:str      # MARKET / LIMIT
     reduce_only:bool
+    reason:str
+
+@dataclass
+class Fill:
+    symbol:str
+    side:str
+    qty:float
+    status:str
+    paper:bool
     reason:str

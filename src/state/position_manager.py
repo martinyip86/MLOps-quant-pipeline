@@ -10,7 +10,19 @@ class PositionManager:
 
         if side == "BUY":
             current += qty
-        elif side == 'SHORT':
+        elif side == "SELL":
             current -= qty
 
         self.positions[symbol] = current
+
+    def on_fill(self,fill):
+        if fill.status != "FILLED":
+            return self.get_qty(fill.symbol)
+
+        self.update_fill(
+            symbol=fill.symbol,
+            side=fill.side,
+            qty=fill.qty
+        )
+
+        return self.get_qty(fill.symbol)
