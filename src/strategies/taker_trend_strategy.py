@@ -47,7 +47,7 @@ class TakerTrendStrategy:
         now_ms = int(time.time() * 1000)
 
         last_ts = self.last_signal_ts.get(symbol,0)
-        if not - last_ts < self.cooldown_ms: return None
+        if now_ms - last_ts < self.cooldown_ms: return None
 
         if not state.is_data_fresh(symbol,max_lag_ms=3000): return None
 

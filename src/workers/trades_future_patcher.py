@@ -103,21 +103,36 @@ class TradesFuturetPatcher(BasePatcher):
                     AND trade_id BETWEEN {min_trade_id} AND {max_trade_id}
                 ORDER BY trade_id ASC
             """
-            arrow = self.ch.query_arrow(sql)
-            ch_df = pl.from_arrow(arrow)
+            settings = {
+                'max_threads': 1,               # 必须为1，严禁并发
+                'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
+                'max_memory_usage': '1G',       # 限制服务器使用的总内存
+                'preferred_block_size_bytes': '1048576',
+            }
+            column_names = ['trade_id','price','amount','timestamp','side']
+            chunks = []
+            with self.ch.query_column_block_stream(sql,settings=settings) as stream:
+                for block in stream:
+                    if not block: continue
+                    chunk_df = pl.from_dict(dict(zip(column_names,block)))
+                    chunks.append(chunk_df)
 
-            diff = csv_df.join(ch_df,on='trade_id',how='anti')
+            if chunks:
+                ch_df:pl.DataFrame = pl.concat(chunks,rechunk=True)
+                del chunks
 
-            if diff.is_empty() and len(csv_df) == len(ch_df):
-                self.logger.info(f"💎 [AUDIT-PASSED] 100% Data Integrity for {exchange_id} {symbol}.")
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                return True
-            else:
-                self.logger.error(f"🚨 [AUDIT-FAILED] Mismatch detected! Gaps found: {len(diff)}")
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                return False
+                diff = csv_df.join(ch_df,on='trade_id',how='anti')
+
+                if diff.is_empty() and len(csv_df) == len(ch_df):
+                    self.logger.info(f"💎 [AUDIT-PASSED] 100% Data Integrity for {exchange_id} {symbol}.")
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    return True
+                else:
+                    self.logger.error(f"🚨 [AUDIT-FAILED] Mismatch detected! Gaps found: {len(diff)}")
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    return False
 
         except Exception as e:
             self.logger.error(f"🚨 [AUDIT-CRASH] Audit process failed: {e}")

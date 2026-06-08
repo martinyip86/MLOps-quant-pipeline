@@ -44,7 +44,7 @@ class FeatureState:
         if snapshot.get("future_orderbook"):
             s["meta"]["future_orderbook_ts"] = snapshot["future_orderbook"]["timestamp"]
 
-        s["meta"]["features_ts"] = max(
+        s["meta"]["feature_ts"] = max(
             ts for ts in [s["meta"]["spot_orderbook_ts"],s["meta"]["future_orderbook_ts"]]
             if ts is not None
         )
