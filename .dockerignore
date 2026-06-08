@@ -12,3 +12,17 @@ data
 __pycache__
 Dockerfile
 docker-compose.yml
+
+# exclude runtime data
+/deploy/clickhouse/clickhouse_data/
+/deploy/clickhouse/clickhouse_data/**
+
+# runtime data
+/deploy/clickhouse/clickhouse_data/
+/deploy/clickhouse/clickhouse_data/**
+/deploy/clickhouse/clickhouse_logs/
+/deploy/clickhouse/clickhouse_logs/**
+/deploy/grafana/grafana_data/
+/deploy/grafana/grafana_data/**
+/deploy/prometheus/prometheus_data/
+/deploy/prometheus/prometheus_data/**

@@ -31,6 +31,11 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   executor-binance:
     build: .
@@ -57,6 +62,11 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # collector-okx:
   #   build: 
@@ -117,6 +127,11 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
 
   # alpha-worker:
@@ -191,50 +206,50 @@ services:
   #   tty: true
   #   stdin_open: true
 
-  prometheus:
-    image: prom/prometheus:latest
-    command: 
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.retention.time=15d'
-      - '--web.enable-lifecycle'
-    volumes:
-      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./deploy/prometheus/prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    deploy:
-      resources:
-        limits:
-          memory: 300M
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   command: 
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.retention.time=15d'
+  #     - '--web.enable-lifecycle'
+  #   volumes:
+  #     - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - ./deploy/prometheus/prometheus_data:/prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 300M
 
-  pushgateway:
-    image: prom/pushgateway:latest
-    ports:
-      - "9091:9091"
+  # pushgateway:
+  #   image: prom/pushgateway:latest
+  #   ports:
+  #     - "9091:9091"
 
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: node-exporter
-    restart: unless-stopped
-    ports:
-      - "9100:9100"
+  # node-exporter:
+  #   image: prom/node-exporter:latest
+  #   container_name: node-exporter
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9100:9100"
 
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=administration
-      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
-    volumes:
-      - ./deploy/grafana/grafana_data:/var/lib/grafana
-    user: "472"
-    depends_on:
-      - prometheus
-    deploy:
-      resources:
-        limits:
-          memory: 256M
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=administration
+  #     - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+  #   volumes:
+  #     - ./deploy/grafana/grafana_data:/var/lib/grafana
+  #   user: "472"
+  #   depends_on:
+  #     - prometheus
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 256M
 
   quant-redis:
     image: redis:alpine
