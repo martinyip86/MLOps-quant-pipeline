@@ -23,23 +23,19 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 1G
-        reservations:
           memory: 512M
+        reservations:
+          memory: 256M
     depends_on:
       quant-redis:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
 
-
-  collector-okx:
-    build: 
-      context: .
-      target: final
-    container_name: collector-okx
-    restart: always
+  executor-binance:
+    build: .
+    container_name: executor-binance
+    # restart: always
     env_file:
       - .env
     volumes:
@@ -47,27 +43,55 @@ services:
       - ./logs:/app/logs
       - ./src:/app/src
     environment:
-      - EXCHANGE=okx
-      - TYPE=spot
+      - EXCHANGE=binance
       - PYTHONPATH=/app
-    healthcheck:
-      test: ["CMD", "curl","-f","http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+    command: python -m src.executor.real_time_executor
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 1G
-        reservations:
           memory: 512M
+        reservations:
+          memory: 256M
     depends_on:
       quant-redis:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+
+  # collector-okx:
+  #   build: 
+  #     context: .
+  #     target: final
+  #   container_name: collector-okx
+  #   restart: always
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./src:/app/src
+  #   environment:
+  #     - EXCHANGE=okx
+  #     - TYPE=spot
+  #     - PYTHONPATH=/app
+  #   healthcheck:
+  #     test: ["CMD", "curl","-f","http://localhost:8080/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0.5'
+  #         memory: 1G
+  #       reservations:
+  #         memory: 512M
+  #   depends_on:
+  #     quant-redis:
+  #       condition: service_healthy
+  #     clickhouse:
+  #       condition: service_healthy
 
   syncer:
     build: .
@@ -85,86 +109,87 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 384M
         reservations:
-          memory: 1G
+          memory: 256M
     depends_on:
       quant-redis:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
 
-  alpha-worker:
-    build: .
-    container_name: alpha-worker-server
-    restart: always
-    env_file:
-      - .env
-    volumes:
-      - ./configs:/app/configs
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./src:/app/src
-    environment:
-      - PYTHONPATH=/app
-    command: python -m src.workers.alpha_worker
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-    depends_on:
-      quant-redis:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
 
-  order-executor:
-    build: .
-    container_name: order-executor-server
-    restart: always
-    env_file:
-      - .env
-    volumes:
-      - ./configs:/app/configs
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./src:/app/src
-    environment:
-      - PYTHONPATH=/app
-    command: python -m src.workers.order_executor
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-    depends_on:
-      quant-redis:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
+  # alpha-worker:
+  #   build: .
+  #   container_name: alpha-worker-server
+  #   restart: always
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./configs:/app/configs
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./src:/app/src
+  #   environment:
+  #     - PYTHONPATH=/app
+  #   command: python -m src.workers.alpha_worker
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1G
+  #   depends_on:
+  #     quant-redis:
+  #       condition: service_healthy
+  #     clickhouse:
+  #       condition: service_healthy
 
-  ofelia:
-    image: mcuadros/ofelia:latest
-    container_name: quant-ofelia
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: daemon --docker
+  # order-executor:
+  #   build: .
+  #   container_name: order-executor-server
+  #   restart: always
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./configs:/app/configs
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./src:/app/src
+  #   environment:
+  #     - PYTHONPATH=/app
+  #   command: python -m src.workers.order_executor
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1G
+  #   depends_on:
+  #     quant-redis:
+  #       condition: service_healthy
+  #     clickhouse:
+  #       condition: service_healthy
 
-  daily-patcher:
-    build: .
-    container_name: quant-daily-patcher
-    command: tail -f /dev/null
-    volumes:
-      - .:/app:cached
-    environment:
-      - PYTHONPATH=/app
-    labels:
-      ofelia.enabled: "true"
-      ofelia.job-exec.daily_full_sync.schedule: "0 0 9 * * *"
-      ofelia.job-exec.daily_full_sync.command: "python -m src.pipeline_runner"
-      ofelia.job-exec.daily_train_alpha.schedule: "0 0 10 * * *"
-      ofelia.job-exec.daily_train_alpha.command: "python -m research.train_alpha"
-    tty: true
-    stdin_open: true
+  # ofelia:
+  #   image: mcuadros/ofelia:latest
+  #   container_name: quant-ofelia
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   command: daemon --docker
+
+  # daily-patcher:
+  #   build: .
+  #   container_name: quant-daily-patcher
+  #   command: tail -f /dev/null
+  #   volumes:
+  #     - .:/app:cached
+  #   environment:
+  #     - PYTHONPATH=/app
+  #   labels:
+  #     ofelia.enabled: "true"
+  #     ofelia.job-exec.daily_full_sync.schedule: "0 0 9 * * *"
+  #     ofelia.job-exec.daily_full_sync.command: "python -m src.pipeline_runner"
+  #     ofelia.job-exec.daily_train_alpha.schedule: "0 0 10 * * *"
+  #     ofelia.job-exec.daily_train_alpha.command: "python -m research.train_alpha"
+  #   tty: true
+  #   stdin_open: true
 
   prometheus:
     image: prom/prometheus:latest
@@ -177,6 +202,10 @@ services:
       - ./deploy/prometheus/prometheus_data:/prometheus
     ports:
       - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 300M
 
   pushgateway:
     image: prom/pushgateway:latest
@@ -202,6 +231,10 @@ services:
     user: "472"
     depends_on:
       - prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   quant-redis:
     image: redis:alpine
@@ -214,7 +247,7 @@ services:
       redis-server
       --bind 0.0.0.0
       --requirepass ${REDIS_PASSWORD}
-      --maxmemory 2gb
+      --maxmemory 256mb
       --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep -q PONG"]
@@ -224,9 +257,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
         reservations:
-          memory: 1G
+          memory: 256M
         
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -256,8 +289,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 1.5G
         reservations:
-          memory: 2G
+          memory: 1G
     restart: always
   
