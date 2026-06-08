@@ -49,19 +49,19 @@ class FeatureState:
             if ts is not None
         )
 
-    def get_features(self,symbol:str):
+    def get_features(self,symbol:str) -> dict:
         return self.state[symbol]["features"]
     
-    def get_snapshot(self,symbol:str):
+    def get_snapshot(self,symbol:str) -> dict:
         return self.state[symbol]["snapshot"]
     
-    def get_position(self,symbol:str):
+    def get_position(self,symbol:str) -> dict:
         return self.state[symbol]["position"]
     
-    def get_risk(self,symbol:str):
+    def get_risk(self,symbol:str) -> dict:
         return self.state[symbol]["risk"]
     
-    def is_data_fresh(self,symbol:str,max_lag_ms:int=3000):
+    def is_data_fresh(self,symbol:str,max_lag_ms:int=3000) -> bool:
         now_ms = int(time.time() * 1000)
         feature_ts = self.state[symbol]["meta"]["feature_ts"]
 

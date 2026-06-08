@@ -3,6 +3,7 @@ from src.utils.logger import setup_logger
 from src.executor.feature_state import FeatureState
 from src.executor.data_manager import DataManager
 from src.strategies.taker_trend_strategy import TakerTrendStrategy
+from src.executor.risk_manager import RiskManager
 
 import asyncio
 import json
@@ -23,6 +24,7 @@ class RealTimeExecutor:
         self.state = FeatureState(self.symbols)
         self.data_manager = DataManager(self.symbols)
         self.strategy = TakerTrendStrategy()
+        self.risk_manager = RiskManager()
 
     async def refresh_stream_keys(self):
         while True:
@@ -75,7 +77,21 @@ class RealTimeExecutor:
                         signal = self.strategy.evaluate(symbol,self.state)
 
                         if signal:
-                            self.logger.info(f"[{signal.symbol}][{signal.side}-{signal.action}] confidence: {signal.confidence} | notional_usd: {signal.notional_usd} | expected_edge_bps: {signal.expected_edge_bps} | cost_bps: {signal.cost_bps}")
+                            risk_decision = self.risk_manager.check_signal(signal,self.state)
+
+                            if not risk_decision.allowed:
+                                self.logger.info(f"[RISK_REJECT][{signal.symbol}] {signal.side}-{signal.action} | {signal.reason}")
+                                continue
+
+                            self.logger.info(f"[RISK_PASSED][{signal.symbol}] {signal.side}-{signal.action} | {signal.reason}")
+
+                            self.logger.info(
+                                f"[{signal.symbol}][{signal.side}-{signal.action}] "
+                                f"confidence: {signal.confidence} | "
+                                f"notional_usd: {signal.notional_usd} | "
+                                f"expected_edge_bps: {signal.expected_edge_bps} | "
+                                f"cost_bps: {signal.cost_bps}"
+                            )
                             self.logger.info(f"----{signal.reason}")
 
     async def main(self):
