@@ -63,19 +63,20 @@ class BinanceFutureManager(StreamBase):
         try:
             async with self.redis.pipeline(transaction=False) as pipe:
                 for trade_dict in trades:
-                    raw_ts = trade_dict.get('timestamp')
-                    ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
-                    trade = TradeDataForFuture(
-                        exchange_id=self.exchange_id,
-                        symbol=symbol,
-                        mkt_type=self.mkt_type,
-                        trade_id=int(trade_dict['id']),
-                        timestamp=ts,
-                        side=trade_dict['side'],
-                        price=trade_dict['price'],
-                        amount=trade_dict['amount']
-                    )
-                    await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=10000,approximate=True)
+                    if trade['price'] > 0 and trade['amount']:
+                        raw_ts = trade_dict.get('timestamp')
+                        ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
+                        trade = TradeDataForFuture(
+                            exchange_id=self.exchange_id,
+                            symbol=symbol,
+                            mkt_type=self.mkt_type,
+                            trade_id=int(trade_dict['id']),
+                            timestamp=ts,
+                            side=trade_dict['side'],
+                            price=trade_dict['price'],
+                            amount=trade_dict['amount']
+                        )
+                        await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=10000,approximate=True)
                 await pipe.execute()
         except Exception as e:
             self.logger.error(f"future trades add redis error: {e}")

@@ -68,4 +68,9 @@ class BasePatcher:
                 time.sleep(1)
             except Exception as e:
                 self.logger.error(f"🚨 [DB-ERROR] Insertion failed: {e}")
+                try:
+                    self.ch.close()
+                except Exception:
+                    pass
+                self.ch = ch_manager.connect()
                 raise

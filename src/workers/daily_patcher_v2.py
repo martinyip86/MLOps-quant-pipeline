@@ -25,5 +25,5 @@ class DailyPatcher:
                 time.sleep(5)
 
 if __name__ == '__main__':
-    obj = DailyPatcher()
+    obj = DailyPatcher('2026-06-08')
     obj.main()
