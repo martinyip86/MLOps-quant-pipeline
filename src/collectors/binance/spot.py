@@ -30,42 +30,40 @@ class BinanceSpotWsManager(StreamBase):
                 self.logger.info("✅ [SUCCESS] Connection established.")
             except Exception as e:
                 self.logger.error(f"❌ [RECONNECT-FAILED] {e}")
-                raise e
+                await asyncio.sleep(5)
             finally:
                 self._is_reconnecting = False
 
     async def _handle_orderbook(self,symbol:str,data):
         stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:orderbook"
-        registry = f"registry:streams:orderbook"
+        registry_key = f"registry:streams:orderbook"
+        await self.register_stream_once(registry_key,stream_key)
         raw_ts = data.get('timestamp')
         ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
-        await self.redis.sadd(registry,stream_key)
         try:
-            async with self.redis.pipeline(transaction=False) as pipe:
-                tick = TickData(
-                    exchange_id=self.exchange_id,
-                    symbol=symbol,
-                    mkt_type=self.mkt_type,
-                    bid_price=data['bids'][0][0],
-                    bid_volume=data['bids'][0][1],
-                    ask_price=data['asks'][0][0],
-                    ask_volume=data['asks'][0][1],
-                    bid_prices=[row[0] for row in data['bids'][:20]],
-                    bid_volumes=[row[1] for row in data['bids'][:20]],
-                    ask_prices=[row[0] for row in data['asks'][:20]],
-                    ask_volumes=[row[1] for row in data['asks'][:20]],
-                    nonce=data['nonce'],
-                    timestamp=ts
-                )
-                await pipe.xadd(stream_key,{'data':tick.model_dump_json()},maxlen=5000,approximate=True)
-                await pipe.execute()
+            tick = TickData(
+                exchange_id=self.exchange_id,
+                symbol=symbol,
+                mkt_type=self.mkt_type,
+                bid_price=data['bids'][0][0],
+                bid_volume=data['bids'][0][1],
+                ask_price=data['asks'][0][0],
+                ask_volume=data['asks'][0][1],
+                bid_prices=[row[0] for row in data['bids'][:20]],
+                bid_volumes=[row[1] for row in data['bids'][:20]],
+                ask_prices=[row[0] for row in data['asks'][:20]],
+                ask_volumes=[row[1] for row in data['asks'][:20]],
+                nonce=data['nonce'],
+                timestamp=ts
+            )
+            await self.redis.xadd(stream_key,{'data':tick.model_dump_json()},maxlen=1000,approximate=True)
         except Exception as e:
             self.logger.error(f"orderbook add redis error: {e}")
 
     async def _handle_trades(self,symbol:str,trades):
         stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:trades"
         registry_key = f"registry:streams:trades"
-        await self.redis.sadd(registry_key,stream_key)
+        await self.register_stream_once(registry_key,stream_key)
         try:
             async with self.redis.pipeline(transaction=False) as pipe:
                 for trade_dict in trades:
@@ -88,7 +86,7 @@ class BinanceSpotWsManager(StreamBase):
                         is_taker_buyer=is_taker_buyer
                     )
                     
-                    await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=5000,approximate=True)
+                    await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=10000,approximate=True)
                 await pipe.execute()
         except Exception as e:
             self.logger.error(f"trades add redis error: {e}")

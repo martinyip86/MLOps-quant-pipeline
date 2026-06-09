@@ -18,7 +18,7 @@ class Syncer:
             log_file="logs/workers/worker_syncer.log"
         )
         self.group_name = "ch_syncer_group"
-        self.batch_size = 2000
+        self.batch_size = 10000
         self.flush_interval = 3.0
 
     async def _get_redis_streaming_key(self):
@@ -67,7 +67,7 @@ class Syncer:
                 for stream_name,messages in response:
                     # print(f"📡 处理来自 {stream_name} 的 {len(messages)} 条消息")
                     s_key = stream_name.decode() if isinstance(stream_name, bytes) else stream_name
-                    if stream_name not in pending_ack:
+                    if s_key not in pending_ack:
                         pending_ack[s_key] = []
 
                     for msg_id,conetent in messages:
@@ -87,7 +87,10 @@ class Syncer:
                     async with self.redis.pipeline(transaction=False) as pipe:
                         for stream_name,msg_ids in pending_ack.items():
                             if msg_ids:
-                                pipe.xack(stream_name,self.group_name,*msg_ids)
+                                try:
+                                    pipe.xack(stream_name,self.group_name,*msg_ids)
+                                except Exception as e:
+                                    self.logger.error(f"❌ [ACK-FAILED] stream={stream_name}, count={len(msg_ids)}, err={e}")
 
                         await pipe.execute()   
 
@@ -122,8 +125,6 @@ class Syncer:
             for target_table, table_data in buckets.items():
                 if table_data:
                     await self._insert_db(target_table, table_data)
-                    # 每写完一张表，微小休眠，给服务器 RSS 释放的时间
-                    await asyncio.sleep(0.1)
 
             return True
         except Exception as e:
@@ -141,7 +142,12 @@ class Syncer:
         with parquet_write_duration.labels(table=table).time():
             try:
                 arrow_table = df.to_arrow()
-                self.ch.insert_arrow(table=table,arrow_table=arrow_table)
+                await asyncio.to_thread(
+                    self.ch.insert_arrow,
+                    table=table,
+                    arrow_table=arrow_table
+                )
+                
                 duration = time.time()-start_time
                 self.logger.info(f"🚢 [FLUSH] Table: {table} | Rows: {len(df)} | binance: {len(df.filter(pl.col('exchange_id')=='binance'))} | okx: {len(df.filter(pl.col('exchange_id')=='okx'))} | Latency: {duration:.3f}s")
 
@@ -160,7 +166,7 @@ class Syncer:
                 redis_mem_gauge.labels(type='used_bytes').set(mem_info['used_memory'])
                 redis_mem_gauge.labels(type='fragmentation').set(mem_info['mem_fragmentation_ratio'])
 
-                if mem_info['used_memory'] > 2.5 * 1024 * 1024 * 1024:
+                if mem_info['used_memory'] > 180 * 1024 * 1024:
                     self.logger.critical("🚨 [MEM-CRITICAL] Redis memory > 2.5GB! System at risk.")
                     if self.streaming_keys:
                         s_keys = self.streaming_keys.keys()

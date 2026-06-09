@@ -15,7 +15,11 @@ class RedisManager:
             password=os.getenv('REDIS_PASSWORD'),
             db=0,
             decode_responses=True,
-            max_connections=200
+            max_connections=200,
+            socket_timeout=30,
+            socket_connect_timeout=10,
+            retry_on_timeout=True,
+            health_check_interval=30,
         )
 
     def _is_in_docker(self):

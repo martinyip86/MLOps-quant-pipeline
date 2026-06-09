@@ -21,6 +21,7 @@ class StreamBase(ABC):
         self._is_reconnecting = False
         self._reconnect_lock = asyncio.Lock()
         self.ws = None
+        self._registered_streams = set()
         self.timeout_settings = {
             'watch_order_book':60,
             'watch_trades':60,
@@ -32,7 +33,15 @@ class StreamBase(ABC):
     async def connect(self):
         pass
 
-    async def watch_loop(self,symbol,method_name,watch_name):
+    async def register_stream_once(self,registry:str,stream_key:str):
+        key = (registry,stream_key)
+        if key in self._registered_streams:
+            return
+        
+        await self.redis.sadd(registry, stream_key)
+        self._registered_streams.add(key)
+
+    async def watch_loop(self,symbol:str,method_name:str,watch_name:str):
         retry_delay = 1
         last_active = time.time()
         time_out_set = self.timeout_settings[method_name]
@@ -72,6 +81,14 @@ class StreamBase(ABC):
                     'symbol':symbol,
                     'data':data
                 })
+                # try:
+                #     self.queue.put_nowait({
+                #         'type':watch_name,
+                #         'symbol':symbol,
+                #         'data':data,
+                #     })
+                # except asyncio.QueueFull:
+                #     self.logger.warning(f"queue full, drop {symbol} {watch_name}")
             except (asyncio.TimeoutError, Exception) as e:
                 is_active = False
                 silence_gap = time.time() - last_active
@@ -119,13 +136,13 @@ class StreamBase(ABC):
                 
                 data_type = msg['type']
                 if data_type == 'orderbook':
-                    asyncio.create_task(self._handle_orderbook(msg['symbol'],msg['data']))
+                    await self._handle_orderbook(msg['symbol'],msg['data'])
                 elif data_type == 'trades':
-                    asyncio.create_task(self._handle_trades(msg['symbol'],msg['data']))
+                    await self._handle_trades(msg['symbol'],msg['data'])
                 elif data_type == 'mark_price':
-                    asyncio.create_task(self._handle_market_price(msg['symbol'],msg['data']))
+                    await self._handle_market_price(msg['symbol'],msg['data'])
                 elif data_type == 'funding_rate':
-                    asyncio.create_task(self._handle_funding_rate(msg['symbol'],msg['data']))
+                    await self._handle_funding_rate(msg['symbol'],msg['data'])
 
                 self.queue.task_done()
             except Exception as e:
