@@ -43,7 +43,7 @@ class Manager:
                         tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_funding_rate','funding_rate')))
 
             tasks.append(asyncio.create_task(controller.route()))
-            tasks.append(asyncio.create_task(controller.start_health_check()))
+            # tasks.append(asyncio.create_task(controller.start_health_check()))
                    
         tasks.append(asyncio.create_task(start_metrics_pusher(job_name=f"market_collector_{self.exchange_id}")))
         
