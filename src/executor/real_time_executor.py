@@ -4,6 +4,7 @@ from src.executor.feature_state import FeatureState
 from src.executor.data_manager import DataManager
 from src.strategies.taker_trend_strategy import TakerTrendStrategy
 from src.executor.risk_manager import RiskManager
+from src.executor.paper_order_manager import PaperOrderManager
 
 import asyncio
 import json
@@ -25,6 +26,7 @@ class RealTimeExecutor:
         self.data_manager = DataManager(self.symbols)
         self.strategy = TakerTrendStrategy()
         self.risk_manager = RiskManager()
+        self.paper_order_manager = PaperOrderManager()
 
     async def refresh_stream_keys(self):
         while True:
@@ -93,6 +95,18 @@ class RealTimeExecutor:
                                 f"cost_bps: {signal.cost_bps}"
                             )
                             self.logger.info(f"----{signal.reason}")
+
+                            fill = self.paper_order_manager.executor(signal,self.state)
+
+                            if fill:
+                                self.logger.info(
+                                    f"[PAPER_FILL][{fill.symbol}][{fill.side}-{fill.action}] "
+                                    f"price={fill.price} | qty={fill.qty} | "
+                                    f"notional={fill.notional_usd} | fee={fill.fee_usd} | "
+                                    f"----{fill.reason}"
+                                )
+                            else:
+                                self.logger.info(f"[PAPER_REJECT][{signal.symbol}] no fill generated")
 
     async def main(self):
         tasks = []

@@ -42,5 +42,12 @@ class PaperOrderManager:
         position["unrealized_pnl"] = 0.0
 
         return PaperFill(
-            symbol=signal.symbol
-        )
+            symbol=signal.symbol,
+            side="long",
+            action="open",
+            price=price,
+            qty=qty,
+            notional_usd=signal.notional_usd,
+            fee_usd=fee_usd,
+            reason="paper open long at best ask"
+        )   

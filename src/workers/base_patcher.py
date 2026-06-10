@@ -21,7 +21,7 @@ class BasePatcher:
         self.logger = logger
         self.exchange_id = exchange_id
         self.symbol = symbol
-        self.ch = ch_manager.connect('hk')
+        self.ch = ch_manager.connect('HK_HOST')
 
     def main(self):
         pass
@@ -49,7 +49,7 @@ class BasePatcher:
             return False
         
     def sync_to_clickhouse(self,df:pl.DataFrame,table:str):
-        chunk_size = 50000
+        chunk_size = 20000
         total_row  = len(df)
 
         for i in range(0,total_row,chunk_size):
@@ -61,8 +61,11 @@ class BasePatcher:
                     arrow_table=chunk.to_arrow(),
                     settings={
                         'async_insert': 0, 
-                        'wait_for_async_insert': 1,
-                        'max_insert_block_size': chunk_size
+                        # 'wait_for_async_insert': 1,
+                        'max_insert_block_size': chunk_size,
+                        "receive_timeout": 300,
+                        "send_timeout": 300,
+                        "connect_timeout": 30,
                     }
                 )
                 time.sleep(1)
