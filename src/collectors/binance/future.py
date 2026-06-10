@@ -63,7 +63,7 @@ class BinanceFutureManager(StreamBase):
         try:
             async with self.redis.pipeline(transaction=False) as pipe:
                 for trade_dict in trades:
-                    if trade['price'] > 0 and trade['amount']:
+                    if trade_dict['price'] > 0 and trade_dict['amount']:
                         raw_ts = trade_dict.get('timestamp')
                         ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
                         trade = TradeDataForFuture(
