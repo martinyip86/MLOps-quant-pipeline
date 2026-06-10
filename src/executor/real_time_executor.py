@@ -5,6 +5,7 @@ from src.executor.data_manager import DataManager
 from src.strategies.taker_trend_strategy import TakerTrendStrategy
 from src.executor.risk_manager import RiskManager
 from src.executor.paper_order_manager import PaperOrderManager
+from src.executor.position_manager import PositionManager
 
 import asyncio
 import json
@@ -27,6 +28,7 @@ class RealTimeExecutor:
         self.strategy = TakerTrendStrategy()
         self.risk_manager = RiskManager()
         self.paper_order_manager = PaperOrderManager()
+        self.position_manager = PositionManager()
 
     async def refresh_stream_keys(self):
         while True:
@@ -76,6 +78,22 @@ class RealTimeExecutor:
                         symbol,features,snapshot = result
                         self.state.update_market(symbol,features,snapshot)
 
+                        close_decision = self.position_manager.check_exit(symbol,self.state)
+
+                        if close_decision.should_close:
+                            close_result = self.position_manager.close_position(symbol,self.state,close_decision)
+
+                            self.logger.info(
+                                f"[PAPER_CLOSE][{close_result['symbol']}]"
+                                f"reason={close_result['reason']} | "
+                                f"exit_price={close_result['exit_price']} | "
+                                f"pnl_usd={close_result['pnl_usd']:.4f} | "
+                                f"pnl_bps={close_result['pnl_bps']:.2f} | "
+                                f"daily_pnl={close_result['daily_pnl']:.4f}"
+                            )
+
+                            continue
+
                         signal = self.strategy.evaluate(symbol,self.state)
 
                         if signal:
@@ -107,6 +125,8 @@ class RealTimeExecutor:
                                 )
                             else:
                                 self.logger.info(f"[PAPER_REJECT][{signal.symbol}] no fill generated")
+
+                            
 
     async def main(self):
         tasks = []
