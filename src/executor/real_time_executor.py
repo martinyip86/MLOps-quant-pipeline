@@ -30,7 +30,7 @@ class RealTimeExecutor:
         self.risk_manager = RiskManager()
         self.paper_order_manager = PaperOrderManager()
         self.position_manager = PositionManager()
-        self.trade_recorder = TradeRecorder()
+        self.trade_recorder = TradeRecorder(self.logger)
 
     async def refresh_stream_keys(self):
         while True:
