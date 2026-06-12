@@ -1,6 +1,5 @@
 from src.storage.clickhouse.client import ch_manager
 from src.utils.logger import setup_logger
-from src.workers.feature_processor import FeatureProcessor
 import polars as pl
 import os
 import gc

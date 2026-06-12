@@ -168,20 +168,21 @@ class TradesSpotPatcher(BasePatcher):
 
             if not gaps_df.is_empty():
                 try:
-                    self.sync_to_clickhouse(gaps_df,'trades_spot')
+                    # self.sync_to_clickhouse(gaps_df,'trades_spot')
+                    self.export_parquet(gaps_df,'trades_spot')
                     self.logger.info(f"✅ [PATCHED] Injected {len(gaps_df)} missing records into {self.exchange_id} {self.symbol}.")
-                    partition_id = self.target_date.replace('-','')
-                    sql = f"OPTIMIZE TABLE market_data.trades_spot PARTITION {partition_id} FINAL"
-                    self.ch.command(sql)
-                    time.sleep(1)
+                    # partition_id = self.target_date.replace('-','')
+                    # sql = f"OPTIMIZE TABLE market_data.trades_spot PARTITION {partition_id} FINAL"
+                    # self.ch.command(sql)
+                    # time.sleep(1)
                 except Exception as e:
                     self.logger.error(f"❌ [GAP-ERROR] Patch failed: {e}")
 
-            self._verify_full_integrity(
-                exchange_id=self.exchange_id,
-                symbol=self.symbol,
-                official_df=official_lf.collect(),
-                file_path=file_path,
-                max_trade_id=max_trade_id,
-                min_trade_id=min_trade_id
-            )
+            # self._verify_full_integrity(
+            #     exchange_id=self.exchange_id,
+            #     symbol=self.symbol,
+            #     official_df=official_lf.collect(),
+            #     file_path=file_path,
+            #     max_trade_id=max_trade_id,
+            #     min_trade_id=min_trade_id
+            # )

@@ -48,8 +48,23 @@ class BasePatcher:
             self.logger.error(f"❌ Disk failure: Unable to write data | Detail: {e}")
             return False
         
+    def export_parquet(self,df:pl.DataFrame,table:str):
+        file_path = os.path.join(
+            "data/patch",
+            self.target_date,
+            self.symbol.replace('/','-'),
+            f"{table}.parquet"
+        )
+        os.makedirs(os.path.dirname(file_path),exist_ok=True)
+        if not os.path.exists(file_path):
+            tmp_path = f"{file_path}.tmp"
+            df.write_parquet(tmp_path)
+            os.replace(tmp_path,file_path)
+            size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
+        
     def sync_to_clickhouse(self,df:pl.DataFrame,table:str):
-        chunk_size = 20000
+        chunk_size = 5000
         total_row  = len(df)
 
         for i in range(0,total_row,chunk_size):

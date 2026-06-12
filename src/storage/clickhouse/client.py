@@ -22,9 +22,6 @@ class ClickhouseManager:
                     username=username,
                     password=password,
                     database=database,
-                    autogenerate_session_id=False,
-                    send_receive_timeout=120,
-                    connect_timeout=120,
                 )
                 print(f"✅ [DATABASE] ClickHouse connection established: {host}:{port}")
             except Exception as e:

@@ -6,6 +6,7 @@ from src.strategies.taker_trend_strategy import TakerTrendStrategy
 from src.executor.risk_manager import RiskManager
 from src.executor.paper_order_manager import PaperOrderManager
 from src.executor.position_manager import PositionManager
+from src.executor.trade_recorder import TradeRecorder
 
 import asyncio
 import json
@@ -29,6 +30,7 @@ class RealTimeExecutor:
         self.risk_manager = RiskManager()
         self.paper_order_manager = PaperOrderManager()
         self.position_manager = PositionManager()
+        self.trade_recorder = TradeRecorder()
 
     async def refresh_stream_keys(self):
         while True:
@@ -92,6 +94,8 @@ class RealTimeExecutor:
                                 f"daily_pnl={close_result['daily_pnl']:.4f}"
                             )
 
+                            self.trade_recorder.recorder_close(close_result,self.state)
+
                             continue
 
                         signal = self.strategy.evaluate(symbol,self.state)
@@ -123,6 +127,8 @@ class RealTimeExecutor:
                                     f"notional={fill.notional_usd} | fee={fill.fee_usd} | "
                                     f"----{fill.reason}"
                                 )
+
+                                self.trade_recorder.recorder_open(signal,fill,self.state)
                             else:
                                 self.logger.info(f"[PAPER_REJECT][{signal.symbol}] no fill generated")
 

@@ -86,12 +86,13 @@ class MarkPriceFuturetPatcher(BasePatcher):
 
                 if not gaps_df.is_empty():
                     try:
-                        self.sync_to_clickhouse(gaps_df,'market_price_future')
+                        # self.sync_to_clickhouse(gaps_df,'market_price_future')
+                        self.export_parquet(gaps_df,'market_price_future')
                         self.logger.info(f"✅ [PATCHED] Injected {len(gaps_df)} missing records into {self.exchange_id} {self.symbol}.")
-                        partition_id = self.target_date.replace('-','')
-                        sql = f"OPTIMIZE TABLE market_data.market_price_future PARTITION {partition_id} FINAL"
-                        self.ch.command(sql)
-                        time.sleep(1)
+                        # partition_id = self.target_date.replace('-','')
+                        # sql = f"OPTIMIZE TABLE market_data.market_price_future PARTITION {partition_id} FINAL"
+                        # self.ch.command(sql)
+                        # time.sleep(1)
                     except Exception as e:
                         self.logger.error(f"❌ [GAP-ERROR] Patch failed: {e}")
                     finally:
