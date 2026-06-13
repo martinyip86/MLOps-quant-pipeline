@@ -53,13 +53,13 @@ class PositionManager:
         exit_notional_usd = exit_price * qty
 
         gross_pnl_usd = (exit_price - entry_price) * qty
-        gross_pnl_bps = (exit_notional_usd - entry_price) / entry_price * 10_000
+        gross_pnl_bps = (exit_price - entry_price) / entry_price * 10_000
 
         open_fee_usd = position.get("open_fee_usd",0.0)
         close_fee_usd = exit_notional_usd * self.taker_fee_bps / 10_000
 
         entry_notional_usd = position.get("entry_notional_usd",entry_price * qty)
-        slippage_usd = entry_notional_usd * self.slippage_bps / 10_000
+        slippage_usd = entry_notional_usd * self.slippage_bps * 2 / 10_000
         
         net_pnl_usd = gross_pnl_usd - open_fee_usd - close_fee_usd - slippage_usd
         net_pnl_bps = net_pnl_usd / entry_notional_usd * 10_000
@@ -83,6 +83,9 @@ class PositionManager:
         
         if net_pnl_bps >= self.take_profit_bps:
             return CloseDecision(True,"take_profit",exit_price,net_pnl_usd,net_pnl_bps)
+        
+        if signal_reverse:
+            return CloseDecision(True, "signal_reverse", exit_price, net_pnl_usd, net_pnl_bps)
         
         if now_ms - entry_time >= self.max_hold_ms:
             return CloseDecision(True,"max_hold_timeout",exit_price,net_pnl_usd,net_pnl_bps)
