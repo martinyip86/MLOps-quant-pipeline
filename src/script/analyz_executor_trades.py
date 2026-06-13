@@ -28,3 +28,37 @@ def main():
     if total == 0:
         print("No closed trades yet.")
         return
+    
+    pnls = [x["pnl_usd"] for x in closes]
+    pnl_bps = [x["pnl_bps"] for x in closes]
+
+    wins = [x for x in closes if x["pnl_usd"] > 0]
+    loss = [x for x in closes if x["pnl_usd"] <= 0]
+
+    reason_count = {}
+    for x in closes:
+        reason = x["reason"]
+        reason_count[reason] = reason_count.get(reason,0) + 1
+
+    print("====== EXECUTOR PAPER TRADE REPORT ======")
+    print(f"open trades: {len(opens)}")
+    print(f"closed trades: {total}")
+    print(f"win rate: {len(wins) / total * 100:.2f}")
+    print(f"total pnl usd: {sum(pnls):.4f}")
+    print(f"avg pnl usd: {sum(pnls) / total:.4f}")
+    print(f"avg pnl bps: {sum(pnl_bps) / total:.4f}")
+    print(f"max pnl bps: {max(pnl_bps):.4f}")
+    print(f"min pnl bps: {min(pnl_bps):.4f}")
+    print(f"reason count: {reason_count}")
+
+    print("\nLast 10 closed trades:")
+    for x in closes[-10:]:
+        print(
+            f"{x['symbol']} | {x['reason']} | "
+            f"pnl_usd={x['pnl_usd']:.4f} | "
+            f"pnl_bps={x['pnl_bps']:.4f} | "
+            f"daily_pnl={x['daily_pnl']:.4f}"
+        )
+
+if __name__ == "__main__":
+    main()

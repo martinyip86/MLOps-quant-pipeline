@@ -37,6 +37,8 @@ class PaperOrderManager:
 
         position["side"] = "long"
         position["qty"] = qty
+        position["open_fee_usd"] = fee_usd
+        position["entry_notional_usd"] = signal.notional_usd
         position["entry_price"] = price
         position["entry_time"] = int(time.time() * 1000)
         position["unrealized_pnl"] = 0.0

@@ -15,12 +15,12 @@ class RiskManager:
         self.max_daily_loss_usd = 500
         self.max_stop_loss_count = 3
         self.max_spread_bps = 3.0
-        self.max_data_lag_max = 3_000
+        self.max_data_lag_ms = 3_000
 
     def check_signal(self,signal:Signal,state:FeatureState) -> RiskDecision:
         symbol = signal.symbol
 
-        if not state.is_data_fresh(symbol,self.max_data_lag_max):
+        if not state.is_data_fresh(symbol,self.max_data_lag_ms):
             return RiskDecision(False,"data not fresh")
         
         risk = state.get_risk(symbol)

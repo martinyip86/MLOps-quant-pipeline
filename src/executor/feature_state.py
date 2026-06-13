@@ -9,6 +9,8 @@ class FeatureState:
                 "position":{
                     "side":None,
                     "qty":0.0,
+                    "open_fee_usd":None,
+                    "entry_notional_usd":None,
                     "entry_price":None,
                     "entry_time":None,
                     "unrealized_pnl":0.0,
