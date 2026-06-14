@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 LOG_PATH = Path("logs/executor/executor_binance.log")
@@ -9,7 +10,15 @@ def extract_json(line:str):
     if not m: return None
     return json.loads(m.group(0))
 
-def main():
+def parse_time(dt):
+    if dt is None: return None
+
+    return int(datetime.strptime(dt,"%Y-%m-%d %H:%M:%S").timestamp() * 1000)
+
+def main(start=None,end=None):
+    start_ts = parse_time(start)
+    end_ts = parse_time(end)
+
     opens = []
     closes = []
 
@@ -18,10 +27,14 @@ def main():
             if "[TRADE_OPEN]" in line:
                 data = extract_json(line)
                 if data:
+                    if start_ts and data["ts"] < start_ts: continue
+                    if end_ts and data["ts"] > end_ts: continue
                     opens.append(data)
             elif "[TRADE_CLOSE]" in line:
                 data = extract_json(line)
                 if data:
+                    if start_ts and data["ts"] < start_ts: continue
+                    if end_ts and data["ts"] > end_ts: continue
                     closes.append(data)
 
     total = len(closes)
@@ -41,6 +54,8 @@ def main():
         reason_count[reason] = reason_count.get(reason,0) + 1
 
     print("====== EXECUTOR PAPER TRADE REPORT ======")
+    if start_ts or end_ts:
+        print(f"ts: {start} ===> {end}")
     print(f"open trades: {len(opens)}")
     print(f"closed trades: {total}")
     print(f"win rate: {len(wins) / total * 100:.2f}")
@@ -61,4 +76,4 @@ def main():
         )
 
 if __name__ == "__main__":
-    main()
+    main('2026-06-13 00:00:00')

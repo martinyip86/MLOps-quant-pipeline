@@ -13,7 +13,7 @@ class RiskManager:
     def __init__(self):
         self.max_notional_usd = 2_500
         self.max_daily_loss_usd = 500
-        self.max_stop_loss_count = 3
+        self.max_stop_loss_count = 5
         self.max_spread_bps = 3.0
         self.max_data_lag_ms = 3_000
 

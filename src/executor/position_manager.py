@@ -14,8 +14,8 @@ class CloseDecision:
 
 class PositionManager:
     def __init__(self):
-        self.stop_loss_bps = -10.0
-        self.take_profit_bps = 15.0
+        self.stop_loss_bps = -25.0
+        self.take_profit_bps = 30.0
         self.max_hold_ms = 50_000
         self.cooldown_after_close_ms = 3_000
 
