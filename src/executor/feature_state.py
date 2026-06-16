@@ -1,4 +1,5 @@
 import time
+from datetime import datetime,timezone
 
 class FeatureState:
     def __init__(self,symbols:list[str]):
@@ -21,6 +22,7 @@ class FeatureState:
                     "last_stop_loss_time":None,
                     "daily_pnl":0.0,
                     "can_trade":True,
+                    "risk_date":None,
                 },
                 "meta":{
                     "update_at":0,
@@ -50,6 +52,16 @@ class FeatureState:
             ts for ts in [s["meta"]["spot_orderbook_ts"],s["meta"]["future_orderbook_ts"]]
             if ts is not None
         )
+
+    def reset_daily_risk_if_needed(self,symbol:str):
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        risk = self.state[symbol]["risk"]
+
+        if risk["risk_date"] != today:
+            risk["risk_date"] = today
+            risk["daily_pnl"] = 0.0
+            risk["stop_loss_count"] = 0
+            risk["can_trade"] = True
 
     def get_features(self,symbol:str) -> dict:
         return self.state[symbol]["features"]

@@ -80,6 +80,8 @@ class RealTimeExecutor:
                         symbol,features,snapshot = result
                         self.state.update_market(symbol,features,snapshot)
 
+                        self.state.reset_daily_risk_if_needed(symbol)
+
                         close_decision = self.position_manager.check_exit(symbol,self.state)
 
                         if close_decision.should_close:
@@ -104,7 +106,7 @@ class RealTimeExecutor:
                             risk_decision = self.risk_manager.check_signal(signal,self.state)
 
                             if not risk_decision.allowed:
-                                self.logger.info(f"[RISK_REJECT][{signal.symbol}] {signal.side}-{signal.action} | {signal.reason}")
+                                self.logger.info(f"[RISK_REJECT][{signal.symbol}] {signal.side}-{signal.action} | {risk_decision.reason} | {signal.reason}")
                                 continue
 
                             self.logger.info(f"[RISK_PASSED][{signal.symbol}] {signal.side}-{signal.action} | {signal.reason}")

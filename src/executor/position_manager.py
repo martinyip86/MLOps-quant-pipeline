@@ -84,8 +84,8 @@ class PositionManager:
         if net_pnl_bps >= self.take_profit_bps:
             return CloseDecision(True,"take_profit",exit_price,net_pnl_usd,net_pnl_bps)
         
-        if signal_reverse:
-            return CloseDecision(True, "signal_reverse", exit_price, net_pnl_usd, net_pnl_bps)
+        # if signal_reverse:
+        #     return CloseDecision(True, "signal_reverse", exit_price, net_pnl_usd, net_pnl_bps)
         
         if now_ms - entry_time >= self.max_hold_ms:
             return CloseDecision(True,"max_hold_timeout",exit_price,net_pnl_usd,net_pnl_bps)
