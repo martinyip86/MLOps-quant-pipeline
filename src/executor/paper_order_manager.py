@@ -19,7 +19,7 @@ class PaperOrderManager:
     def __init__(self):
         self.taker_fee_bps = 5.0
 
-    def executor(self,signal:Signal,state:FeatureState):
+    def execute(self,signal:Signal,state:FeatureState):
         symbol = signal.symbol
         snapshot = state.get_snapshot(symbol)
         position = state.get_position(symbol)

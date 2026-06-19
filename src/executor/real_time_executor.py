@@ -7,6 +7,7 @@ from src.executor.risk_manager import RiskManager
 from src.executor.paper_order_manager import PaperOrderManager
 from src.executor.position_manager import PositionManager
 from src.executor.trade_recorder import TradeRecorder
+from src.executor.feature_recorder import FeatureRecorder
 
 import asyncio
 import json
@@ -31,6 +32,7 @@ class RealTimeExecutor:
         self.paper_order_manager = PaperOrderManager()
         self.position_manager = PositionManager()
         self.trade_recorder = TradeRecorder(self.logger)
+        self.feature_recorder = FeatureRecorder(self.logger)
 
     async def refresh_stream_keys(self):
         while True:
@@ -80,6 +82,8 @@ class RealTimeExecutor:
                         symbol,features,snapshot = result
                         self.state.update_market(symbol,features,snapshot)
 
+                        self.feature_recorder.record(symbol,features,snapshot)
+
                         self.state.reset_daily_risk_if_needed(symbol)
 
                         close_decision = self.position_manager.check_exit(symbol,self.state)
@@ -120,7 +124,7 @@ class RealTimeExecutor:
                             )
                             self.logger.info(f"----{signal.reason}")
 
-                            fill = self.paper_order_manager.executor(signal,self.state)
+                            fill = self.paper_order_manager.execute(signal,self.state)
 
                             if fill:
                                 self.logger.info(
