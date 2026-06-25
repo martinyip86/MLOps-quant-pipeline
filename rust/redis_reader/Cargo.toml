@@ -1,0 +1,25 @@
+[package]
+name="redis_reader"
+version="0.1.0"
+edition="2021"
+
+[dependencies]
+
+tokio={
+    version="1",
+    features=["full"]
+}
+
+redis={
+    version="0.32",
+    features=[
+        "tokio-comp"
+    ]
+}
+
+serde_json="1"
+
+serde={
+    version="1",
+    features=["derive"]
+}
