@@ -8,7 +8,7 @@ from src.executor.risk_manager import RiskManager
 from src.executor.paper_order_manager import PaperOrderManager
 from src.executor.position_manager import PositionManager
 
-LOG_PATH = Path("logs/executor/executor_binance.log")
+LOG_PATH = Path("logs/executor/executor_binance.log.5")
 
 def extract_json(line:str):
     m = re.search(r"\{.*\}",line)

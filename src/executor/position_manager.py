@@ -60,6 +60,7 @@ class PositionManager:
 
         entry_notional_usd = position.get("entry_notional_usd",entry_price * qty)
         slippage_usd = entry_notional_usd * self.slippage_bps * 2 / 10_000
+        # slippage_usd = entry_notional_usd * self.slippage_bps / 10_000
         
         net_pnl_usd = gross_pnl_usd - open_fee_usd - close_fee_usd - slippage_usd
         net_pnl_bps = net_pnl_usd / entry_notional_usd * 10_000
