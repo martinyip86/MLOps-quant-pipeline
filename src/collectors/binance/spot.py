@@ -16,6 +16,9 @@ class BinanceSpotWsManager(StreamBase):
                 if self.ws:
                     self.logger.info(f"🔄 [CLOSE] Close old CCXT Pro client for {self.exchange_id}")
                     await self.ws.close()
+                    # Clear the old client before creating the replacement. If
+                    # construction fails, watch_loop will see ws=None and retry.
+                    self.ws = None
                 self.logger.info(f"🔄 [RECONNECT] Initializing new CCXT Pro client for {self.exchange_id}...")
                 self.ws = ccxt_pro.binance({
                     'enableRateLimit':True,
@@ -29,8 +32,11 @@ class BinanceSpotWsManager(StreamBase):
                 await asyncio.sleep(0.01)
                 self.logger.info("✅ [SUCCESS] Connection established.")
             except Exception as e:
+                self.ws = None
                 self.logger.error(f"❌ [RECONNECT-FAILED] {e}")
-                await asyncio.sleep(5)
+                # Re-raise so the caller's retry/backoff loop handles the
+                # failed reconnect instead of leaving a half-alive collector.
+                raise e
             finally:
                 self._is_reconnecting = False
 
@@ -90,4 +96,3 @@ class BinanceSpotWsManager(StreamBase):
                 await pipe.execute()
         except Exception as e:
             self.logger.error(f"trades add redis error: {e}")
-

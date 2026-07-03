@@ -16,6 +16,9 @@ class OkxFutureManager(StreamBase):
                 if self.ws:
                     self.logger.info(f"🔄 [CLOSE] Close old CCXT Pro client for {self.exchange_id}")
                     await self.ws.close()
+                    # Clear the old client before reconnecting so a failed new
+                    # client does not leave a closed ws object behind.
+                    self.ws = None
                 self.logger.info(f"🔄 [RECONNECT] Initializing new CCXT Pro client for {self.exchange_id}...")
                 self.ws = ccxt_pro.okx({
                     'enableRateLimit':True,
@@ -30,6 +33,7 @@ class OkxFutureManager(StreamBase):
                 await asyncio.sleep(0.01)
                 self.logger.info("✅ [SUCCESS] Connection established.")
             except Exception as e:
+                self.ws = None
                 self.logger.error(f"❌ [RECONNECT-FAILED] {e}")
                 raise e
             finally:
@@ -112,6 +116,11 @@ class OkxFutureManager(StreamBase):
         while True:
             try:
                 if self._is_reconnecting or not self.ws:
+                    if not self._is_reconnecting:
+                        # This loop is outside watch_loop, so it must reconnect
+                        # itself when startup or a previous reconnect left ws=None.
+                        self._is_reconnecting = True
+                        await self.connect()
                     await asyncio.sleep(1)
                     continue
                 

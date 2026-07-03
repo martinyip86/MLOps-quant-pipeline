@@ -3,9 +3,11 @@ from src.collectors.binance.future import BinanceFutureManager
 from src.collectors.okx.spot import OkxSpotWsManager
 from src.collectors.okx.future import OkxFutureManager
 from src.monitoring.pusher import start_metrics_pusher
+from aiohttp import web
 import os
 import asyncio
 import argparse
+import time
 
 class Manager:
     def __init__(self,exchange_id:str):
@@ -21,13 +23,20 @@ class Manager:
 
     async def main(self):
         tasks = []
+        controllers = []
         for mkt_type in self.mkt_types:
             collector_class = self._collector_map.get((self.exchange_id,mkt_type))
             if not collector_class:
                 print(f"Error: {self.exchange_id} {mkt_type} 不在支持列表中")
                 return
             controller = collector_class(self.exchange_id,mkt_type)
-            await controller.connect()
+            controllers.append(controller)
+            try:
+                await controller.connect()
+            except Exception as e:
+                # Do not abort the whole process on startup connection failure.
+                # watch_loop and the periodic future tasks will keep retrying.
+                controller.logger.error(f"initial connect failed, background tasks will retry: {e}")
                     
             for symbol in self.symbols:
                 if mkt_type == 'spot':
@@ -43,11 +52,37 @@ class Manager:
                         tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_funding_rate','funding_rate')))
 
             tasks.append(asyncio.create_task(controller.route()))
-            # tasks.append(asyncio.create_task(controller.start_health_check()))
                    
         tasks.append(asyncio.create_task(start_metrics_pusher(job_name=f"market_collector_{self.exchange_id}")))
+        tasks.append(asyncio.create_task(self.start_health_check(controllers)))
         
         await asyncio.gather(*tasks)
+
+    async def start_health_check(self,controllers:list,port:int=8080):
+        async def handle(_request):
+            now = time.time()
+            stale = [
+                f"{controller.exchange_id}:{controller.mkt_type}:{now - controller.last_time:.1f}s"
+                for controller in controllers
+                if now - controller.last_time > 120
+            ]
+
+            if stale:
+                return web.Response(status=500,text=f"Data Silence: {', '.join(stale)}")
+
+            return web.Response(status=200,text="OK")
+        
+        app = web.Application()
+        app.router.add_get('/health',handle)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner,'0.0.0.0',port)
+        print(f"✅ Manager health check server started at : {port}/health")
+        await site.start()
+
+        # Keep the health server task alive for the lifetime of the collector.
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

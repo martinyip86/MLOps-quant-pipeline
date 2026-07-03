@@ -55,8 +55,18 @@ class StreamBase(ABC):
 
         while True:
             try:
-                if self._is_reconnecting or not self.ws:
+                if self._is_reconnecting:
                     await asyncio.sleep(1)
+                    continue
+
+                if not self.ws:
+                    # If startup connect failed or the client was cleared after a
+                    # bad reconnect, the watch task should repair itself instead
+                    # of sleeping forever with ws=None.
+                    self._is_reconnecting = True
+                    await self.connect()
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 60)
                     continue
 
                 method = getattr(self.ws,method_name)

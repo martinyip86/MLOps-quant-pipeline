@@ -16,6 +16,9 @@ class BinanceFutureManager(StreamBase):
                 if self.ws:
                     self.logger.info(f"🔄 [CLOSE] Close old CCXT Pro client for {self.exchange_id}")
                     await self.ws.close()
+                    # Clear the old client before creating the replacement. If
+                    # construction fails, background loops can retry from ws=None.
+                    self.ws = None
                 self.logger.info(f"🔄 [RECONNECT] Initializing new CCXT Pro client for {self.exchange_id}...")
                 self.ws = ccxt_pro.binanceusdm({
                     'enableRateLimit':True,
@@ -29,6 +32,7 @@ class BinanceFutureManager(StreamBase):
                 await asyncio.sleep(0.01)
                 self.logger.info("✅ [SUCCESS] Connection established.")
             except Exception as e:
+                self.ws = None
                 self.logger.error(f"❌ [RECONNECT-FAILED] {e}")
                 raise e
             finally:
@@ -123,6 +127,19 @@ class BinanceFutureManager(StreamBase):
         await self.register_stream_once(registry,stream_key)
         while True:
             try:
+                if self._is_reconnecting:
+                    await asyncio.sleep(1)
+                    continue
+
+                if not self.ws:
+                    # REST-style periodic tasks also need self-healing. Without
+                    # this, open-interest polling would only log errors forever
+                    # after a failed startup connection.
+                    self._is_reconnecting = True
+                    await self.connect()
+                    await asyncio.sleep(1)
+                    continue
+
                 data = await asyncio.wait_for(self.ws.fetch_open_interest(future_symbol),timeout=60)
                 raw_ts = data.get('timestamp')
                 ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
@@ -147,7 +164,20 @@ class BinanceFutureManager(StreamBase):
         registry = f"registry:streams:liquidations"
         await self.register_stream_once(registry,stream_key)
         while True:
+            data = None
             try:
+                if self._is_reconnecting:
+                    await asyncio.sleep(1)
+                    continue
+
+                if not self.ws:
+                    # Liquidation watch is not routed through watch_loop, so it
+                    # must perform the same reconnect check itself.
+                    self._is_reconnecting = True
+                    await self.connect()
+                    await asyncio.sleep(1)
+                    continue
+
                 data = await self.ws.watch_liquidations(future_symbol)
                 
                 async with self.redis.pipeline(transaction=False) as pipe:

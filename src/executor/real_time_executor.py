@@ -5,12 +5,14 @@ from src.executor.data_manager import DataManager
 from src.strategies.taker_trend_strategy import TakerTrendStrategy
 from src.executor.risk_manager import RiskManager
 from src.executor.paper_order_manager import PaperOrderManager
+from src.executor.exchange_order_manager import ExchangeOrderManager
 from src.executor.position_manager import PositionManager
 from src.executor.trade_recorder import TradeRecorder
 from src.executor.feature_recorder import FeatureRecorder
 
 import asyncio
 import json
+import os
 
 class RealTimeExecutor:
     def __init__(self):
@@ -30,6 +32,8 @@ class RealTimeExecutor:
         self.strategy = TakerTrendStrategy()
         self.risk_manager = RiskManager()
         self.paper_order_manager = PaperOrderManager()
+        self.exchange_order_manager = ExchangeOrderManager(self.logger)
+        self.execution_mode = os.getenv("EXECUTION_MODE","paper").lower()
         self.position_manager = PositionManager()
         self.trade_recorder = TradeRecorder(self.logger)
         self.feature_recorder = FeatureRecorder(self.logger)
@@ -58,6 +62,7 @@ class RealTimeExecutor:
             await asyncio.sleep(30)
 
     async def consume_market_data(self):
+        
         while True:
             if not self.streamings:
                 await asyncio.sleep(1)
@@ -89,18 +94,38 @@ class RealTimeExecutor:
                         close_decision = self.position_manager.check_exit(symbol,self.state)
 
                         if close_decision.should_close:
-                            close_result = self.position_manager.close_position(symbol,self.state,close_decision)
+                            if self.execution_mode == "paper":
+                                close_result = self.position_manager.close_position(symbol,self.state,close_decision)
 
-                            self.logger.info(
-                                f"[PAPER_CLOSE][{close_result['symbol']}]"
-                                f"reason={close_result['reason']} | "
-                                f"exit_price={close_result['exit_price']} | "
-                                f"pnl_usd={close_result['pnl_usd']:.4f} | "
-                                f"pnl_bps={close_result['pnl_bps']:.2f} | "
-                                f"daily_pnl={close_result['daily_pnl']:.4f}"
-                            )
+                                self.logger.info(
+                                    f"[PAPER_CLOSE][{close_result['symbol']}]"
+                                    f"reason={close_result['reason']} | "
+                                    f"exit_price={close_result['exit_price']} | "
+                                    f"pnl_usd={close_result['pnl_usd']:.4f} | "
+                                    f"pnl_bps={close_result['pnl_bps']:.2f} | "
+                                    f"daily_pnl={close_result['daily_pnl']:.4f}"
+                                )
 
-                            self.trade_recorder.recorder_close(close_result,self.state)
+                                self.trade_recorder.recorder_close(close_result,self.state)
+
+                            else:
+                                position = self.state.get_position(symbol)
+                                close_order = self.exchange_order_manager.close_long(symbol,position["qty"])
+
+                                self.logger.info(
+                                    f"[EXCHANGE_CLOSE][{symbol}] "
+                                    f"reason={close_decision.reason} | "
+                                    f"qty={position['qty']} | "
+                                    f"order={close_order}"
+                                )
+
+                                close_result = self.position_manager.close_position(
+                                    symbol,
+                                    self.state,
+                                    close_decision
+                                )
+
+                                self.trade_recorder.recorder_close(close_result,self.state)
 
                             continue
 
@@ -124,11 +149,19 @@ class RealTimeExecutor:
                             )
                             self.logger.info(f"----{signal.reason}")
 
-                            fill = self.paper_order_manager.execute(signal,self.state)
+                            if self.execution_mode == "paper":
+                                fill = self.paper_order_manager.execute(signal,self.state)
+                                fill_prefix = "PAPER_FILL"
+                            else:
+                                # Non-paper mode uses ccxt. It is still protected by
+                                # LIVE_TRADING_ENABLED inside ExchangeOrderManager, so
+                                # EXECUTION_MODE=live alone only creates dry-run payloads.
+                                fill = await self.exchange_order_manager.execute(signal,self.state)
+                                fill_prefix = "EXCHANGE_FILL"
 
                             if fill:
                                 self.logger.info(
-                                    f"[PAPER_FILL][{fill.symbol}][{fill.side}-{fill.action}] "
+                                    f"[{fill_prefix}][{fill.symbol}][{fill.side}-{fill.action}] "
                                     f"price={fill.price} | qty={fill.qty} | "
                                     f"notional={fill.notional_usd} | fee={fill.fee_usd} | "
                                     f"----{fill.reason}"
@@ -144,8 +177,31 @@ class RealTimeExecutor:
         tasks = []
         tasks.append(asyncio.create_task(self.refresh_stream_keys()))
         tasks.append(asyncio.create_task(self.consume_market_data()))
+        if self.execution_mode != "paper":
+            tasks.append(asyncio.create_task(self.refresh_account_snapshot()))
         await asyncio.gather(*tasks)
+
+    async def refresh_account_snapshot(self):
+        # Account reads are useful before live trading: they show whether keys,
+        # permissions, futures account, balance, and position APIs are working.
+        # This task does NOT place orders. Actual order placement is guarded in
+        # ExchangeOrderManager by LIVE_TRADING_ENABLED.
+        while True:
+            try:
+                account_snapshot = await self.exchange_order_manager.fetch_account_snapshot(self.symbols)
+                self.state.update_account_snapshot(account_snapshot)
+            except Exception as e:
+                self.logger.error(f"[ACCOUNT_ERROR] {e}")
+            await asyncio.sleep(30)
 
 if __name__ == '__main__':
     obj = RealTimeExecutor()
-    asyncio.run(obj.main())
+    try:
+        asyncio.run(obj.main())
+    finally:
+        # Close ccxt aiohttp sessions cleanly when the process exits.
+        # In Docker this usually runs during graceful shutdown.
+        try:
+            asyncio.run(obj.exchange_order_manager.close())
+        except Exception:
+            pass
