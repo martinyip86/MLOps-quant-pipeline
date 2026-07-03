@@ -21,10 +21,11 @@ class BinanceSpotWsManager(StreamBase):
                     self.ws = None
                 self.logger.info(f"🔄 [RECONNECT] Initializing new CCXT Pro client for {self.exchange_id}...")
                 self.ws = ccxt_pro.binance({
-                    'enableRateLimit':True,
-                    'options':{
-                        'defaultType':'spot',
-                        'ws': { 
+                    "enableRateLimit":True,
+                    "options":{
+                        "defaultType":"spot",
+                        "adjustForTimeDifference":True,
+                        "ws": { 
                             "heartbeat": 20000 
                         }
                     }

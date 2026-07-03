@@ -1,6 +1,6 @@
 from src.workers.trades_spot_patcher import TradesSpotPatcher
-from src.workers.trades_future_patcher import TradesFuturetPatcher
-from src.workers.mark_price_future_patcher import MarkPriceFuturetPatcher
+from workers.trades_swap_patcher import TradesSwapPatcher
+from workers.mark_price_swap_patcher import MarkPriceSwapPatcher
 from src.utils.logger import setup_logger
 
 from dotenv import load_dotenv
@@ -114,9 +114,9 @@ class DailyPatcher:
             for symbol in self.symbols:
                 TradesSpotPatcher(exchange_id,symbol,self.target_date,self.logger).main()
                 time.sleep(5)
-                TradesFuturetPatcher(exchange_id,symbol,self.target_date,self.logger).main()
+                TradesSwapPatcher(exchange_id,symbol,self.target_date,self.logger).main()
                 time.sleep(5)
-                MarkPriceFuturetPatcher(exchange_id,symbol,self.target_date,self.logger).main()
+                MarkPriceSwapPatcher(exchange_id,symbol,self.target_date,self.logger).main()
                 time.sleep(5)
                 self.upload_to_server(exchange_id,self.target_date,symbol)
 

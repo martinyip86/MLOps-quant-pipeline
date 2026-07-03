@@ -3,10 +3,10 @@ import polars as pl
 import os
 import time
 
-class TradesFuturetPatcher(BasePatcher):
+class TradesSwapPatcher(BasePatcher):
     def __init__(self,exchange_id:str,symbol:str,target_date:str,logger):
         super().__init__(exchange_id,symbol,target_date,logger)
-        self.mkt_type = 'future'
+        self.mkt_type = 'swap'
 
     def _get_url(self,exchange_id:str,symbol:str,target_date:str):
         binance_symbol = symbol.replace('/','').replace('-','')
@@ -15,11 +15,11 @@ class TradesFuturetPatcher(BasePatcher):
         urls = {
             'binance':{
                 'url':f"https://data.binance.vision/data/futures/um/daily/trades/{binance_symbol}/{binance_symbol}-trades-{target_date}.zip",
-                'file_path':f"temp/{exchange_id}/future/{binance_symbol}-trades-{target_date}.csv"
+                'file_path':f"temp/{exchange_id}/swap/{binance_symbol}-trades-{target_date}.csv"
             },
             'okx':{
                 'url':f"https://static.okx.com/cdn/okex/traderecords/trades/daily/{clear_date}/{okx_symbol}-SWAP-trades-{target_date}.zip",
-                'file_path':f"temp/{exchange_id}/future/{okx_symbol}-SWAP-trades-{target_date}.csv"
+                'file_path':f"temp/{exchange_id}/swap/{okx_symbol}-SWAP-trades-{target_date}.csv"
             }
         }
         exchange_data = urls[exchange_id]
@@ -66,7 +66,7 @@ class TradesFuturetPatcher(BasePatcher):
     
     def _get_ch_data(self,exchange_id:str,symbol:str,max_trade_id,min_trade_id) -> pl.LazyFrame:
         sql = f"""
-            SELECT trade_id FROM market_data.trades_future
+            SELECT trade_id FROM market_data.trades_swap
             WHERE trade_id BETWEEN {min_trade_id} AND {max_trade_id}
                 AND exchange_id='{exchange_id}'
                 AND symbol='{symbol}'
@@ -98,7 +98,7 @@ class TradesFuturetPatcher(BasePatcher):
                     timestamp,
                     side
                 FROM
-                    trades_future
+                    trades_swap
                 WHERE exchange_id='{exchange_id}' AND symbol='{symbol}'
                     AND trade_id BETWEEN {min_trade_id} AND {max_trade_id}
                 ORDER BY trade_id ASC
@@ -160,11 +160,11 @@ class TradesFuturetPatcher(BasePatcher):
 
             if not gaps_df.is_empty():
                 try:
-                    # self.sync_to_clickhouse(gaps_df,'trades_future')
-                    self.export_parquet(gaps_df,'trades_future')
+                    # self.sync_to_clickhouse(gaps_df,'trades_swap')
+                    self.export_parquet(gaps_df,'trades_swap')
                     self.logger.info(f"✅ [PATCHED] Injected {len(gaps_df)} missing records into {self.exchange_id} {self.symbol}.")
                     # partition_id = self.target_date.replace('-','')
-                    # sql = f"OPTIMIZE TABLE market_data.trades_future PARTITION {partition_id} FINAL"
+                    # sql = f"OPTIMIZE TABLE market_data.trades_swap PARTITION {partition_id} FINAL"
                     # self.ch.command(sql)
                     # time.sleep(1)
                 except Exception as e:

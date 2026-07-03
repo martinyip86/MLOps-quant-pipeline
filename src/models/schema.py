@@ -31,7 +31,7 @@ class TradeData(BaseModel):
     is_taker_buyer:bool = Field(...,description="Directional intent: True=Taker Buy (Bullish), False=Taker Sell (Bearish)")
     local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
 
-class OrderbookForFuture(BaseModel):
+class OrderbookForSwap(BaseModel):
     exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")
     symbol:str = Field(...,description="Instrument symbol")
     mkt_type:str = Field(...,description="Market segment (spot/swap/future)")
@@ -43,7 +43,7 @@ class OrderbookForFuture(BaseModel):
     timestamp:int = Field(...,description="Original exchange matching engine timestamp (ms)")
     local_timestamp:int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
 
-class TradeDataForFuture(BaseModel):
+class TradeDataForSwap(BaseModel):
     exchange_id:str = Field(...,description="Bxchange identifier (e.g., Binance, OKX)")
     symbol:str = Field(...,description="Instrument symbol")
     mkt_type:str = Field(...,description="Market segment (spot/swap/future)")

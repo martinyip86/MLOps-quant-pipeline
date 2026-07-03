@@ -3,7 +3,7 @@ from src.storage.redis.client import redis_manager
 import asyncio
 from logging import Logger
 
-class RedisStreamKeys:
+class StreamKeys:
     def __init__(self):
         self.redis = redis_manager.connect
 

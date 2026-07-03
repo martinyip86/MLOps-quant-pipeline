@@ -96,8 +96,8 @@ class Consolidator:
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
                 self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
 
-    def _export_orderbook_future(self,exchange_id:str,symbol:str,target_date:str):
-        file_path = self._generate_filepath(exchange_id,symbol,'future','orderbook',target_date)
+    def _export_orderbook_swap(self,exchange_id:str,symbol:str,target_date:str):
+        file_path = self._generate_filepath(exchange_id,symbol,'swap','orderbook',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
@@ -128,7 +128,7 @@ class Consolidator:
                         ask_prices,
                         ask_volumes,
                         timestamp
-                    FROM market_data.orderbook_future
+                    FROM market_data.orderbook_swap
                     WHERE exchange_id='{exchange_id}'
                         AND symbol='{symbol}'
                         AND timestamp >= {start_ts}
@@ -149,7 +149,7 @@ class Consolidator:
                 df = df.with_columns([
                     pl.lit(exchange_id).alias('exchange_id'),
                     pl.lit(symbol).alias('symbol'),
-                    pl.lit('future').alias('mkt_type'),
+                    pl.lit('swap').alias('mkt_type'),
                     ((pl.col('bid_prices').list.get(0) * pl.col('ask_volumes').list.get(0) + pl.col('ask_prices').list.get(0) * pl.col('bid_volumes').list.get(0)) / (pl.col('bid_volumes').list.get(0) + pl.col('ask_volumes').list.get(0) + 1e-8)).alias('micro_price'),
                     (pl.col('ask_prices').list.get(0) - pl.col('bid_prices').list.get(0)).alias('spread'),
                     ((pl.col('bid_prices').list.get(0) + pl.col('ask_prices').list.get(0)) / 2).alias('mid_price'),
@@ -215,8 +215,8 @@ class Consolidator:
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
                 self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
 
-    def _export_trades_future(self,exchange_id:str,symbol:str,target_date:str):
-        file_path = self._generate_filepath(exchange_id,symbol,'future','trades',target_date)
+    def _export_trades_swap(self,exchange_id:str,symbol:str,target_date:str):
+        file_path = self._generate_filepath(exchange_id,symbol,'swap','trades',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
@@ -229,7 +229,7 @@ class Consolidator:
                     amount,
                     side,
                     timestamp
-                FROM market_data.trades_future
+                FROM market_data.trades_swap
                 WHERE exchange_id='{exchange_id}'
                     AND symbol='{symbol}'
                     AND price > 0
@@ -257,7 +257,7 @@ class Consolidator:
                 df = df.with_columns([
                     pl.lit(exchange_id).alias('exchange_id'),
                     pl.lit(symbol).alias('symbol'),
-                    pl.lit('future').alias('mkt_type')
+                    pl.lit('swap').alias('mkt_type')
                 ]).sort('timestamp')
                 tmp_path = f"{file_path}.tmp"
                 df.write_parquet(tmp_path)
@@ -266,8 +266,8 @@ class Consolidator:
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
                 self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
 
-    def _export_mark_price_future(self,exchange_id:str,symbol:str,target_date:str):
-        file_path = self._generate_filepath(exchange_id,symbol,'future','mark_price',target_date)
+    def _export_mark_price_swap(self,exchange_id:str,symbol:str,target_date:str):
+        file_path = self._generate_filepath(exchange_id,symbol,'swap','mark_price',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
@@ -278,7 +278,7 @@ class Consolidator:
                     mark_price,
                     index_price,
                     timestamp
-                FROM market_data.market_price_future
+                FROM market_data.market_price_swap
                 WHERE exchange_id='{exchange_id}'
                     AND symbol='{symbol}'
                     AND timestamp >= {start_ts}
@@ -303,7 +303,7 @@ class Consolidator:
                 df = df.with_columns([
                     pl.lit(exchange_id).alias('exchange_id'),
                     pl.lit(symbol).alias('symbol'),
-                    pl.lit('future').alias('mkt_type')
+                    pl.lit('swap').alias('mkt_type')
                 ]).sort('timestamp')
                 tmp_path = f"{file_path}.tmp"
                 df.write_parquet(tmp_path)
@@ -312,8 +312,8 @@ class Consolidator:
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
                 self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
 
-    def _export_open_interest_future(self,exchange_id:str,symbol:str,target_date:str):
-        file_path = self._generate_filepath(exchange_id,symbol,'future','open_interest',target_date)
+    def _export_open_interest_swap(self,exchange_id:str,symbol:str,target_date:str):
+        file_path = self._generate_filepath(exchange_id,symbol,'swap','open_interest',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
@@ -324,7 +324,7 @@ class Consolidator:
                     base_volume,
                     open_interest_amount,
                     timestamp
-                FROM market_data.open_interest_future
+                FROM market_data.open_interest_swap
                 WHERE exchange_id='{exchange_id}'
                     AND symbol='{symbol}'
                     AND timestamp >= {start_ts}
@@ -349,7 +349,7 @@ class Consolidator:
                 df = df.with_columns([
                     pl.lit(exchange_id).alias('exchange_id'),
                     pl.lit(symbol).alias('symbol'),
-                    pl.lit('future').alias('mkt_type')
+                    pl.lit('swap').alias('mkt_type')
                 ]).sort('timestamp')
                 tmp_path = f"{file_path}.tmp"
                 df.write_parquet(tmp_path)
@@ -358,8 +358,8 @@ class Consolidator:
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
                 self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
 
-    def _export_funding_rate_future(self,exchange_id:str,symbol:str,target_date:str):
-        file_path = self._generate_filepath(exchange_id,symbol,'future','funding_rate',target_date)
+    def _export_funding_rate_swap(self,exchange_id:str,symbol:str,target_date:str):
+        file_path = self._generate_filepath(exchange_id,symbol,'swap','funding_rate',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
@@ -370,7 +370,7 @@ class Consolidator:
                     funding_rate,
                     next_funding_rate_timestamp,
                     timestamp
-                FROM market_data.funding_rate_future
+                FROM market_data.funding_rate_swap
                 WHERE exchange_id='{exchange_id}'
                     AND symbol='{symbol}'
                     AND timestamp >= {start_ts}
@@ -395,7 +395,7 @@ class Consolidator:
                 df = df.with_columns([
                     pl.lit(exchange_id).alias('exchange_id'),
                     pl.lit(symbol).alias('symbol'),
-                    pl.lit('future').alias('mkt_type')
+                    pl.lit('swap').alias('mkt_type')
                 ]).sort('timestamp')
                 tmp_path = f"{file_path}.tmp"
                 df.write_parquet(tmp_path)
@@ -404,8 +404,8 @@ class Consolidator:
                 size_mb = os.path.getsize(file_path) / (1024 * 1024)
                 self.logger.info(f"✨ Export successful: {file_path} | Size: {size_mb:.2f}MB")
 
-    def _export_liquidations_future(self,exchange_id:str,symbol:str,target_date:str):
-        file_path = self._generate_filepath(exchange_id,symbol,'future','liquidations',target_date)
+    def _export_liquidations_swap(self,exchange_id:str,symbol:str,target_date:str):
+        file_path = self._generate_filepath(exchange_id,symbol,'swap','liquidations',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
@@ -419,7 +419,7 @@ class Consolidator:
                     time_in_force,
                     order_status,
                     timestamp
-                FROM market_data.liquidations_future
+                FROM market_data.liquidations_swap
                 WHERE exchange_id='{exchange_id}'
                     AND symbol='{symbol}'
                     AND timestamp >= {start_ts}
@@ -444,7 +444,7 @@ class Consolidator:
                 df = df.with_columns([
                     pl.lit(exchange_id).alias('exchange_id'),
                     pl.lit(symbol).alias('symbol'),
-                    pl.lit('future').alias('mkt_type')
+                    pl.lit('swap').alias('mkt_type')
                 ]).sort('timestamp')
                 tmp_path = f"{file_path}.tmp"
                 df.write_parquet(tmp_path)
@@ -467,13 +467,13 @@ class Consolidator:
             print(current_target_date)
             for symbol in self.symbols:
                 self._export_orderbook_spot(exchange_id,symbol,current_target_date)
-                self._export_orderbook_future(exchange_id,symbol,current_target_date)
+                self._export_orderbook_swap(exchange_id,symbol,current_target_date)
                 self._export_trades_spot(exchange_id,symbol,current_target_date)
-                self._export_trades_future(exchange_id,symbol,current_target_date)
-                self._export_mark_price_future(exchange_id,symbol,current_target_date)
-                self._export_open_interest_future(exchange_id,symbol,current_target_date)
-                self._export_funding_rate_future(exchange_id,symbol,current_target_date)
-                self._export_liquidations_future(exchange_id,symbol,current_target_date)
+                self._export_trades_swap(exchange_id,symbol,current_target_date)
+                self._export_mark_price_swap(exchange_id,symbol,current_target_date)
+                self._export_open_interest_swap(exchange_id,symbol,current_target_date)
+                self._export_funding_rate_swap(exchange_id,symbol,current_target_date)
+                self._export_liquidations_swap(exchange_id,symbol,current_target_date)
 
         self.logger.info("generate completed.")
 

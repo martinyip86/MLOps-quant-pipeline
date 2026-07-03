@@ -4,10 +4,10 @@ import os
 import time
 
 
-class MarkPriceFuturetPatcher(BasePatcher):
+class MarkPriceSwapPatcher(BasePatcher):
     def __init__(self,exchange_id:str,symbol:str,target_date:str,logger):
         super().__init__(exchange_id,symbol,target_date,logger)
-        self.mkt_type = 'future'
+        self.mkt_type = 'swap'
 
     def _get_url(self,exchange_id:str,symbol:str,target_date:str):
         binance_symbol = symbol.replace('/','').replace('-','')
@@ -16,7 +16,7 @@ class MarkPriceFuturetPatcher(BasePatcher):
         urls = {
             'binance':{
                 'url':f"https://data.binance.vision/data/futures/um/daily/markPriceKlines/{binance_symbol}/1m/{binance_symbol}-1m-{target_date}.zip",
-                'file_path':f"temp/{exchange_id}/future/{binance_symbol}-1m-{target_date}.csv"
+                'file_path':f"temp/{exchange_id}/swap/{binance_symbol}-1m-{target_date}.csv"
             }
         }
         if exchange_id in urls:
@@ -51,7 +51,7 @@ class MarkPriceFuturetPatcher(BasePatcher):
     
     def _get_ch_data(self,exchange_id:str,symbol:str,max_timestamp,min_timestamp) -> pl.LazyFrame:
         sql = f"""
-            SELECT timestamp FROM market_data.market_price_future
+            SELECT timestamp FROM market_data.market_price_swap
             WHERE timestamp BETWEEN {min_timestamp} AND {max_timestamp}
                 AND exchange_id='{exchange_id}'
                 AND symbol='{symbol}'
@@ -86,11 +86,11 @@ class MarkPriceFuturetPatcher(BasePatcher):
 
                 if not gaps_df.is_empty():
                     try:
-                        # self.sync_to_clickhouse(gaps_df,'market_price_future')
-                        self.export_parquet(gaps_df,'market_price_future')
+                        # self.sync_to_clickhouse(gaps_df,'market_price_swap')
+                        self.export_parquet(gaps_df,'market_price_swap')
                         self.logger.info(f"✅ [PATCHED] Injected {len(gaps_df)} missing records into {self.exchange_id} {self.symbol}.")
                         # partition_id = self.target_date.replace('-','')
-                        # sql = f"OPTIMIZE TABLE market_data.market_price_future PARTITION {partition_id} FINAL"
+                        # sql = f"OPTIMIZE TABLE market_data.market_price_swap PARTITION {partition_id} FINAL"
                         # self.ch.command(sql)
                         # time.sleep(1)
                     except Exception as e:

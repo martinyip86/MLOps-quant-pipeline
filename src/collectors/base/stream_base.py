@@ -47,7 +47,7 @@ class StreamBase(ABC):
         time_out_set = self.timeout_settings[method_name]
         is_active = True
         
-        if self.mkt_type == 'future':
+        if self.mkt_type == 'swap':
             split_symbol = symbol.split('/')
             watch_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
         else:

@@ -1,10 +1,10 @@
 from src.collectors.base.stream_base import StreamBase
-from src.models.schema import TradeDataForFuture,MarketPriceData,OpenInterestData,FundingRateData,OrderbookForFuture
+from src.models.schema import TradeDataForSwap,MarketPriceData,OpenInterestData,FundingRateData,OrderbookForSwap
 import ccxt.pro as ccxt_pro
 import asyncio
 import time
 
-class OkxFutureManager(StreamBase):
+class OkxSwapManager(StreamBase):
     def __init__(self, exchange_id, mkt_type):
         super().__init__(exchange_id, mkt_type)
 
@@ -23,7 +23,7 @@ class OkxFutureManager(StreamBase):
                 self.ws = ccxt_pro.okx({
                     'enableRateLimit':True,
                     'options':{
-                        'defaultType':'future',
+                        'defaultType':'swap',
                         'ws': { 
                             "heartbeat": 20000 
                         }
@@ -47,7 +47,7 @@ class OkxFutureManager(StreamBase):
         await self.redis.sadd(registry,stream_key)
         try:
             async with self.redis.pipeline(transaction=False) as pipe:
-                tick = OrderbookForFuture(
+                tick = OrderbookForSwap(
                     exchange_id=self.exchange_id,
                     symbol=symbol,
                     mkt_type=self.mkt_type,
@@ -72,7 +72,7 @@ class OkxFutureManager(StreamBase):
                 for trade_dict in trades:
                     raw_ts = trade_dict.get('timestamp')
                     ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
-                    trade = TradeDataForFuture(
+                    trade = TradeDataForSwap(
                         exchange_id=self.exchange_id,
                         symbol=symbol,
                         mkt_type=self.mkt_type,
@@ -85,7 +85,7 @@ class OkxFutureManager(StreamBase):
                     await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=5000,approximate=True)
                 await pipe.execute()
         except Exception as e:
-            self.logger.error(f"future trades add redis error: {e}")
+            self.logger.error(f"swap trades add redis error: {e}")
 
     async def _handle_market_price(self,symbol:str,data):
         stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:market_price"
@@ -112,7 +112,7 @@ class OkxFutureManager(StreamBase):
 
     async def fetch_open_interest(self,symbol:str,sleep_time:int=30):
         split_symbol = symbol.split('/')
-        future_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
+        swap_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
         while True:
             try:
                 if self._is_reconnecting or not self.ws:
@@ -124,7 +124,7 @@ class OkxFutureManager(StreamBase):
                     await asyncio.sleep(1)
                     continue
                 
-                data = await asyncio.wait_for(self.ws.fetch_open_interest(future_symbol),timeout=120)
+                data = await asyncio.wait_for(self.ws.fetch_open_interest(swap_symbol),timeout=120)
                 stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
                 registry = f"registry:streams:open_interest"
                 await self.redis.sadd(registry,stream_key)

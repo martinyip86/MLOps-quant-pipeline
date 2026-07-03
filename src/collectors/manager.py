@@ -1,7 +1,7 @@
 from src.collectors.binance.spot import BinanceSpotWsManager
-from src.collectors.binance.future import BinanceFutureManager
+from src.collectors.binance.swap import BinanceSwapManager
 from src.collectors.okx.spot import OkxSpotWsManager
-from src.collectors.okx.future import OkxFutureManager
+from src.collectors.okx.swap import OkxSwapManager
 from src.monitoring.pusher import start_metrics_pusher
 from aiohttp import web
 import os
@@ -12,13 +12,13 @@ import time
 class Manager:
     def __init__(self,exchange_id:str):
         self.exchange_id:str = exchange_id
-        self.mkt_types = ['spot','future']
+        self.mkt_types = ['spot','swap']
         self.symbols = ['BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT']
         self._collector_map = {
             ('binance','spot'):BinanceSpotWsManager,
             ('okx','spot'):OkxSpotWsManager,
-            ('binance','future'):BinanceFutureManager,
-            ('okx','future'):OkxFutureManager,
+            ('binance','swap'):BinanceSwapManager,
+            ('okx','swap'):OkxSwapManager,
         }
 
     async def main(self):
@@ -35,14 +35,14 @@ class Manager:
                 await controller.connect()
             except Exception as e:
                 # Do not abort the whole process on startup connection failure.
-                # watch_loop and the periodic future tasks will keep retrying.
+                # watch_loop and the periodic swap tasks will keep retrying.
                 controller.logger.error(f"initial connect failed, background tasks will retry: {e}")
                     
             for symbol in self.symbols:
                 if mkt_type == 'spot':
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_order_book','orderbook')))
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_trades','trades')))
-                if mkt_type == 'future':
+                if mkt_type == 'swap':
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_order_book','orderbook')))
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_trades','trades')))
                     tasks.append(asyncio.create_task(controller.watch_loop(symbol, 'watch_mark_price','mark_price')))

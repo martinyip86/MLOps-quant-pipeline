@@ -1,10 +1,10 @@
 from src.collectors.base.stream_base import StreamBase
-from src.models.schema import TradeDataForFuture,MarketPriceData,OpenInterestData,FundingRateData,OrderbookForFuture,LiquidationsData
+from src.models.schema import TradeDataForSwap,MarketPriceData,OpenInterestData,FundingRateData,OrderbookForSwap,LiquidationsData
 import ccxt.pro as ccxt_pro
 import asyncio
 import time
 
-class BinanceFutureManager(StreamBase):
+class BinanceSwapManager(StreamBase):
     def __init__(self, exchange_id, mkt_type):
         super().__init__(exchange_id, mkt_type)
 
@@ -21,10 +21,11 @@ class BinanceFutureManager(StreamBase):
                     self.ws = None
                 self.logger.info(f"🔄 [RECONNECT] Initializing new CCXT Pro client for {self.exchange_id}...")
                 self.ws = ccxt_pro.binanceusdm({
-                    'enableRateLimit':True,
-                    'options':{
-                        'defaultType':'swap',
-                        'ws': { 
+                    "enableRateLimit":True,
+                    "options":{
+                        "defaultType":"swap",
+                        "adjustForTimeDifference":True,
+                        "ws": { 
                             "heartbeat": 20000 
                         }
                     }
@@ -45,7 +46,7 @@ class BinanceFutureManager(StreamBase):
         raw_ts = data.get('timestamp')
         ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
         try:
-            tick = OrderbookForFuture(
+            tick = OrderbookForSwap(
                 exchange_id=self.exchange_id,
                 symbol=symbol,
                 mkt_type=self.mkt_type,
@@ -70,7 +71,7 @@ class BinanceFutureManager(StreamBase):
                     if trade_dict['price'] > 0 and trade_dict['amount'] > 0:
                         raw_ts = trade_dict.get('timestamp')
                         ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
-                        trade = TradeDataForFuture(
+                        trade = TradeDataForSwap(
                             exchange_id=self.exchange_id,
                             symbol=symbol,
                             mkt_type=self.mkt_type,
@@ -83,7 +84,7 @@ class BinanceFutureManager(StreamBase):
                         await pipe.xadd(stream_key,{'data':trade.model_dump_json()},maxlen=10000,approximate=True)
                 await pipe.execute()
         except Exception as e:
-            self.logger.error(f"future trades add redis error: {e}")
+            self.logger.error(f"swap trades add redis error: {e}")
 
     async def _handle_market_price(self,symbol:str,data):
         stream_key_mp = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:market_price"
@@ -121,7 +122,7 @@ class BinanceFutureManager(StreamBase):
 
     async def fetch_open_interest(self,symbol:str,sleep_time:int=30):
         split_symbol = symbol.split('/')
-        future_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
+        swap_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
         stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:open_interest"
         registry = f"registry:streams:open_interest"
         await self.register_stream_once(registry,stream_key)
@@ -140,7 +141,7 @@ class BinanceFutureManager(StreamBase):
                     await asyncio.sleep(1)
                     continue
 
-                data = await asyncio.wait_for(self.ws.fetch_open_interest(future_symbol),timeout=60)
+                data = await asyncio.wait_for(self.ws.fetch_open_interest(swap_symbol),timeout=60)
                 raw_ts = data.get('timestamp')
                 ts = raw_ts if raw_ts is not None else int(time.time() * 1000)
                 oiData = OpenInterestData(
@@ -159,7 +160,7 @@ class BinanceFutureManager(StreamBase):
 
     async def watch_liquidations(self,symbol:str):
         split_symbol = symbol.split('/')
-        future_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
+        swap_symbol = f"{split_symbol[0]}/{split_symbol[1]}:{split_symbol[1]}"
         stream_key = f"md:{self.exchange_id}:{self.mkt_type}:{symbol.replace('/','-')}:liquidations"
         registry = f"registry:streams:liquidations"
         await self.register_stream_once(registry,stream_key)
@@ -178,7 +179,7 @@ class BinanceFutureManager(StreamBase):
                     await asyncio.sleep(1)
                     continue
 
-                data = await self.ws.watch_liquidations(future_symbol)
+                data = await self.ws.watch_liquidations(swap_symbol)
                 
                 async with self.redis.pipeline(transaction=False) as pipe:
                     for item in data:
