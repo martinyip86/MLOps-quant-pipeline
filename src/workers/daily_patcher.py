@@ -1,6 +1,6 @@
 from src.workers.trades_spot_patcher import TradesSpotPatcher
-from workers.trades_swap_patcher import TradesSwapPatcher
-from workers.mark_price_swap_patcher import MarkPriceSwapPatcher
+from src.workers.trades_swap_patcher import TradesSwapPatcher
+from src.workers.mark_price_swap_patcher import MarkPriceSwapPatcher
 from src.utils.logger import setup_logger
 
 from dotenv import load_dotenv
