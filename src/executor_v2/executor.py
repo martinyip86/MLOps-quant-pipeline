@@ -4,10 +4,13 @@ import json
 from src.storage.redis.client import redis_manager
 from src.utils.logger import setup_logger
 
+from src.strategies.taker_trend_strategy_v2 import TakerTrendStrategy
+
 from src.executor_v2.stream_keys import StreamKeys
 from src.executor_v2.data_manager import DataManager
 from src.executor_v2.state import State
 from src.executor_v2.exchange import Exchange
+from src.executor_v2.risk import Risk
 
 class Executor:
     def __init__(self):
@@ -25,8 +28,10 @@ class Executor:
         self.streamings:dict[str,str] = {}
 
         self.stream_keys = StreamKeys()
+        self.strategy = TakerTrendStrategy()
         self.data_manager = DataManager(self.symbols)
         self.state = State(self.symbols)
+        self.risk = Risk()
         self.exchange = Exchange(
             logger=self.logger,
             symbols=self.symbols
@@ -78,8 +83,10 @@ class Executor:
                             symbol,features,snapshot = result
                             self.state.update_market_data(symbol,features,snapshot)
 
+                            signal = self.strategy.evaluate(symbol,self.state)
                             
-                                
+                            if signal:
+                                self.risk
 
     async def run(self):
         await self.redis.sadd("registry:streams:orderbook","md:binance:spot:BTC-USDT:orderbook")
