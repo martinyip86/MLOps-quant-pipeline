@@ -182,7 +182,7 @@ class Consolidator:
             ]
             chunks = []
 
-            for i in range(6):
+            for i in range(8):
                 start_ts = int(date_obj.timestamp() * 1000 + i * interval_ms)
                 end_ts = start_ts + interval_ms -1
                 sql = f"""
@@ -233,37 +233,41 @@ class Consolidator:
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
-            start_ts = int(date_obj.timestamp() * 1000)
-            end_ts = start_ts + 24 * 60 * 60 * 1000 -1
-            sql = f"""
-                SELECT
-                    trade_id,
-                    price,
-                    amount,
-                    side,
-                    timestamp
-                FROM market_data.trades_spot
-                WHERE exchange_id='{exchange_id}'
-                    AND symbol='{symbol}'
-                    AND price > 0
-                    AND amount > 0
-                    AND timestamp >= {start_ts}
-                    AND timestamp <= {end_ts}
-            """
-            settings = {
-                'max_threads': 1,               # 必须为1，严禁并发
-                'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
-                'max_memory_usage': '1G',       # 限制服务器使用的总内存
-                'preferred_block_size_bytes': '1048576',
-            }
-            
-            column_names = ['trade_id','price','amount','side','timestamp']
+            date_obj = date_obj.replace(tzinfo=timezone.utc)
+            interval_ms = 4 * 60 * 60 * 1000
+
             chunks = []
-            with self.ch.query_column_block_stream(sql,settings=settings) as stream:
-                for block in stream:
-                    if not block: continue
-                    chunk_df = pl.from_dict(dict(zip(column_names,block)))
-                    chunks.append(chunk_df)
+            for i in range(6):
+                start_ts = int(date_obj.timestamp() * 1000 + i * interval_ms)
+                end_ts = start_ts + interval_ms -1
+                sql = f"""
+                    SELECT
+                        trade_id,
+                        price,
+                        amount,
+                        side,
+                        timestamp
+                    FROM market_data.trades_spot
+                    WHERE exchange_id='{exchange_id}'
+                        AND symbol='{symbol}'
+                        AND price > 0
+                        AND amount > 0
+                        AND timestamp >= {start_ts}
+                        AND timestamp <= {end_ts}
+                """
+                settings = {
+                    'max_threads': 1,               # 必须为1，严禁并发
+                    'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
+                    'max_memory_usage': '1G',       # 限制服务器使用的总内存
+                    'preferred_block_size_bytes': '1048576',
+                }
+                
+                column_names = ['trade_id','price','amount','side','timestamp']
+                with self.ch.query_column_block_stream(sql,settings=settings) as stream:
+                    for block in stream:
+                        if not block: continue
+                        chunk_df = pl.from_dict(dict(zip(column_names,block)))
+                        chunks.append(chunk_df)
             if chunks:
                 df:pl.DataFrame = pl.concat(chunks,rechunk=True)
                 del chunks
@@ -283,38 +287,44 @@ class Consolidator:
         file_path = self._generate_filepath(exchange_id,symbol,'swap','trades',target_date)
         if not os.path.exists(file_path):
             date_obj = datetime.strptime(target_date,'%Y-%m-%d')
+            date_obj = datetime.strptime(target_date,'%Y-%m-%d')
             date_obj = date_obj.replace(tzinfo=timezone.utc)
-            start_ts = int(date_obj.timestamp() * 1000)
-            end_ts = start_ts + 24 * 60 * 60 * 1000 -1
-            sql = f"""
-                SELECT
-                    trade_id,
-                    price,
-                    amount,
-                    side,
-                    timestamp
-                FROM market_data.trades_swap
-                WHERE exchange_id='{exchange_id}'
-                    AND symbol='{symbol}'
-                    AND price > 0
-                    AND amount > 0
-                    AND timestamp >= {start_ts}
-                    AND timestamp <= {end_ts}
-            """
-
-            settings = {
-                'max_threads': 1,               # 必须为1，严禁并发
-                'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
-                'max_memory_usage': '1G',       # 限制服务器使用的总内存
-                'preferred_block_size_bytes': '1048576',
-            }
-            column_names = ['trade_id','price','amount','side','timestamp']
+            interval_ms = 4 * 60 * 60 * 1000
             chunks = []
-            with self.ch.query_column_block_stream(sql,settings=settings) as stream:
-                for block in stream:
-                    if not block: continue
-                    chunk_df = pl.from_dict(dict(zip(column_names,block)))
-                    chunks.append(chunk_df)
+            
+            for i in range(6):
+                start_ts = int(date_obj.timestamp() * 1000 + i * interval_ms)
+                end_ts = start_ts + interval_ms -1
+                sql = f"""
+                    SELECT
+                        trade_id,
+                        price,
+                        amount,
+                        side,
+                        timestamp
+                    FROM market_data.trades_swap
+                    WHERE exchange_id='{exchange_id}'
+                        AND symbol='{symbol}'
+                        AND price > 0
+                        AND amount > 0
+                        AND timestamp >= {start_ts}
+                        AND timestamp <= {end_ts}
+                """
+
+                settings = {
+                    'max_threads': 1,               # 必须为1，严禁并发
+                    'max_block_size': 500,         # 极其重要：从 8192 降到 1000，减小服务器单次读取的负担
+                    'max_memory_usage': '1G',       # 限制服务器使用的总内存
+                    'preferred_block_size_bytes': '1048576',
+                }
+                column_names = ['trade_id','price','amount','side','timestamp']
+                chunks = []
+                with self.ch.query_column_block_stream(sql,settings=settings) as stream:
+                    for block in stream:
+                        if not block: continue
+                        chunk_df = pl.from_dict(dict(zip(column_names,block)))
+                        chunks.append(chunk_df)
+                        
             if chunks:
                 df:pl.DataFrame = pl.concat(chunks,rechunk=True)
                 del chunks
