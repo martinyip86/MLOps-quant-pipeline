@@ -1,10 +1,10 @@
 <div align="center">
 
-# Ouroboros Quant Pipeline
+# MLOps-quant-pipeline
 
 **An event-driven crypto quant pipeline—from live market data to research, backtesting, and paper-first execution.**
 
-Binance & OKX · Spot & Perpetuals · Redis Streams · ClickHouse · Polars · Docker Compose
+Binance · OKX · Kraken · Spot & Perpetuals · Redis Streams · ClickHouse · Polars · Docker Compose
 
 </div>
 
@@ -12,11 +12,11 @@ Binance & OKX · Spot & Perpetuals · Redis Streams · ClickHouse · Polars · D
 > Experimental software for research and engineering purposes.  
 > Paper trading is enabled by default. This is not financial advice.
 
-## Why Ouroboros?
+## Why MLOps-quant-pipeline?
 
-Most quant repositories stop at notebooks or isolated backtests. Ouroboros connects the full workflow:
+Most quant repositories stop at notebooks or isolated backtests. MLOps-quant-pipeline connects the full workflow:
 
-- Collect real-time order books, trades, mark prices, open interest, funding rates, and liquidations
+- Collect real-time market data from Binance, OKX, and Kraken, including order books, trades, and exchange-supported derivatives data
 - Route market events through Redis Streams
 - Persist data to ClickHouse in Arrow-based batches
 - Generate features and evaluate strategies with Polars
@@ -27,7 +27,7 @@ Most quant repositories stop at notebooks or isolated backtests. Ouroboros conne
 
 ```mermaid
 flowchart LR
-    EX["Binance / OKX<br/>Spot + Perpetuals"]
+    EX["Binance / OKX / Kraken<br/>Spot + Perpetuals"]
     C["Async Collectors"]
     R["Redis Streams"]
     S["Batch Syncer"]
@@ -47,7 +47,7 @@ flowchart LR
 
 | Area | What is implemented |
 |---|---|
-| Market data | Binance and OKX spot/perpetual collectors |
+| Market data | Binance, OKX, and Kraken collectors |
 | Streaming | Redis Streams with consumer groups |
 | Storage | Batched ClickHouse ingestion using Polars and Arrow |
 | Research | Feature generation, labeling, threshold search, and backtesting |
@@ -70,7 +70,7 @@ curl -fsS http://localhost:8080/health
 
 ## Project Status
 
-Ouroboros is under active development. The current stable path is the original
+MLOps-quant-pipeline is under active development. The current stable path is the original
 executor under `src/executor/`; `src/executor_v2/` should be considered experimental.
 
 See the roadmap for upcoming work on testing, reproducible deployment,
